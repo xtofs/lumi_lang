@@ -1,3 +1,4 @@
+use crate::ast::{Expr, Lit, MatchArm, Pattern};
 /// Liveness / use-count analysis on the source AST.
 ///
 /// Perceus needs to know, for each variable at each program point:
@@ -6,9 +7,7 @@
 ///
 /// We approximate this with simple syntactic use-counting.
 /// A production implementation would use dataflow analysis.
-
 use std::collections::HashSet;
-use crate::ast::{Expr, Lit, Pattern, MatchArm};
 
 /// Free variables of an expression (variables not bound within it).
 pub fn free_vars(expr: &Expr) -> HashSet<String> {
@@ -63,6 +62,12 @@ fn collect_fvs(expr: &Expr, out: &mut HashSet<String>) {
         Expr::Con { fields, .. } => {
             for f in fields {
                 collect_fvs(f, out);
+            }
+        }
+
+        Expr::Foreign { args, .. } => {
+            for a in args {
+                collect_fvs(a, out);
             }
         }
     }
@@ -133,7 +138,11 @@ pub fn use_count(var: &str, expr: &Expr) -> usize {
         }
 
         Expr::Lam { param, body } => {
-            if param == var { 0 } else { use_count(var, body) }
+            if param == var {
+                0
+            } else {
+                use_count(var, body)
+            }
         }
 
         Expr::App(f, x) => use_count(var, f) + use_count(var, x),
@@ -141,8 +150,7 @@ pub fn use_count(var: &str, expr: &Expr) -> usize {
         Expr::If { cond, then_, else_ } => {
             // The variable is consumed along exactly one branch, but we need
             // a live copy entering both.  Take the max of the two branches.
-            use_count(var, cond)
-                + use_count(var, then_).max(use_count(var, else_))
+            use_count(var, cond) + use_count(var, then_).max(use_count(var, else_))
         }
 
         Expr::Match { scrutinee, arms } => {
@@ -163,5 +171,7 @@ pub fn use_count(var: &str, expr: &Expr) -> usize {
         }
 
         Expr::Con { fields, .. } => fields.iter().map(|f| use_count(var, f)).sum(),
+
+        Expr::Foreign { args, .. } => args.iter().map(|a| use_count(var, a)).sum(),
     }
 }

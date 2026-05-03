@@ -12,12 +12,17 @@
 
 /* ── Value representation ─────────────────────────────────
  *
- *  Every heap object is a Value.  Closures set tag=TAG_CLOSURE
- *  and store a function pointer in the `fn` field.
- *  All other values leave `fn` NULL.
+ *  Every heap object is a fixed 16-byte header followed by
+ *  a raw payload of `size` bytes, interpreted by tag:
  *
- *  rc_dec always traverses `fields[]` regardless of tag, so
- *  closure environments are freed correctly without special cases.
+ *    TAG_CLOSURE  payload = LumiFn (8 bytes) | Value* captures[]
+ *    TAG_INT      payload = int64_t  (8 bytes)
+ *    TAG_STR      payload = const char* (8 bytes)
+ *    ADT cons     payload = Value* fields[]   (size / sizeof(Value*) fields)
+ *    0-arity cons payload = empty             (size = 0)
+ *
+ *  rc_dec traverses the payload according to the tag so that
+ *  closure captures and constructor fields are freed correctly.
  * ─────────────────────────────────────────────────────── */
 struct Value;
 typedef struct Value *(*LumiFn)(struct Value *env, struct Value *arg);
@@ -26,28 +31,28 @@ typedef struct Value
 {
     uint32_t rc;
     uint32_t tag;
-    uint32_t nfields;
-    LumiFn fn; /* non-NULL only for TAG_CLOSURE */
-    struct Value *fields[];
+    uint32_t size;   /* payload size in bytes */
+    uint32_t _pad;   /* alignment: keeps payload 8-byte aligned */
+    uint8_t  payload[];
 } Value;
 
 /* ── Reuse token ─────────────────────────────────────────── */
-typedef struct
-{
-    Value *mem;
-} ReuseToken;
+typedef struct { Value *mem; } ReuseToken;
 
 /* ── Constructor tags ────────────────────────────────────── */
 enum
 {
-    TAG_FALSE = 0,
-    TAG_TRUE = 1,
-    TAG_NIL = 2,
-    TAG_CONS = 3,
-    TAG_NONE = 4,
-    TAG_SOME = 5,
-    TAG_SUCC = 6,
-    TAG_ZERO = 7,
+    TAG_FALSE   = 0,
+    TAG_TRUE    = 1,
+    TAG_NIL     = 2,
+    TAG_CONS    = 3,
+    TAG_NONE    = 4,
+    TAG_SOME    = 5,
+    TAG_SUCC    = 6,
+    TAG_ZERO    = 7,
+    TAG_STR     = 8,
+    TAG_INT     = 9,
+    TAG_UNIT    = 10,
     TAG_CLOSURE = 0xFFFFFFFE,
 };
 
@@ -55,18 +60,32 @@ enum
 
 static inline void rc_inc(Value *v)
 {
-    if (v)
-        v->rc++;
+    if (v) v->rc++;
 }
 
 static inline void rc_dec(Value *v)
 {
     if (!v || v->rc > 0xFFFF00)
-        return; /* immortal (unit, etc.) */
+        return; /* immortal */
     if (--v->rc == 0)
     {
-        for (uint32_t i = 0; i < v->nfields; i++)
-            rc_dec(v->fields[i]);
+        if (v->tag == TAG_CLOSURE)
+        {
+            /* Skip fn pointer; traverse captures */
+            Value **caps = (Value **)(v->payload + sizeof(LumiFn));
+            uint32_t ncaps = (v->size - (uint32_t)sizeof(LumiFn))
+                             / (uint32_t)sizeof(Value *);
+            for (uint32_t i = 0; i < ncaps; i++)
+                rc_dec(caps[i]);
+        }
+        else if (v->tag != TAG_INT && v->tag != TAG_STR)
+        {
+            /* ADT constructor: entire payload is Value* fields */
+            Value **fields = (Value **)v->payload;
+            uint32_t nfields = v->size / (uint32_t)sizeof(Value *);
+            for (uint32_t i = 0; i < nfields; i++)
+                rc_dec(fields[i]);
+        }
         free(v);
     }
 }
@@ -77,99 +96,102 @@ static inline void rc_dec(Value *v)
  *                if RC>1,  decrement and return a NULL token.
  *
  *  reuse_con / alloc_con: use or ignore the token, then
- *  initialise the header (rc=1, tag, nfields).
+ *  initialise the header (rc=1, tag, size).
  * ─────────────────────────────────────────────────────────── */
 
 static inline ReuseToken try_reuse(Value *v)
 {
-    if (!v)
-        return (ReuseToken){NULL};
-    if (v->rc == 1)
-        return (ReuseToken){v};
+    if (!v)       return (ReuseToken){NULL};
+    if (v->rc==1) return (ReuseToken){v};
     rc_dec(v);
     return (ReuseToken){NULL};
 }
 
 static inline Value *reuse_con(ReuseToken tok, uint32_t tag, uint32_t nfields)
 {
-    Value *v = tok.mem
-                   ? tok.mem
-                   : malloc(sizeof(Value) + nfields * sizeof(Value *));
-    v->rc = 1;
-    v->tag = tag;
-    v->nfields = nfields;
-    v->fn = NULL;
+    uint32_t size = nfields * (uint32_t)sizeof(Value *);
+    Value *v = tok.mem ? tok.mem : malloc(sizeof(Value) + size);
+    v->rc = 1; v->tag = tag; v->size = size; v->_pad = 0;
     return v;
 }
 
 static inline Value *alloc_con(uint32_t tag, uint32_t nfields)
 {
-    Value *v = malloc(sizeof(Value) + nfields * sizeof(Value *));
-    v->rc = 1;
-    v->tag = tag;
-    v->nfields = nfields;
-    v->fn = NULL;
+    uint32_t size = nfields * (uint32_t)sizeof(Value *);
+    Value *v = malloc(sizeof(Value) + size);
+    v->rc = 1; v->tag = tag; v->size = size; v->_pad = 0;
     return v;
 }
+
+/* ── Field accessors ─────────────────────────────────────── */
+
+static inline Value *field(Value *v, uint32_t i)
+{
+    return ((Value **)v->payload)[i];
+}
+
+static inline void set_field(Value *v, uint32_t i, Value *val)
+{
+    ((Value **)v->payload)[i] = val;
+}
+
+static inline Value *closure_cap(Value *env, uint32_t i)
+{
+    return ((Value **)(env->payload + sizeof(LumiFn)))[i];
+}
+
+static inline uint32_t tag_of(Value *v) { return v ? v->tag : 0; }
 
 /* ── Closure primitives ──────────────────────────────────────
  *
  *  alloc_closure(fn, ncaptures, cap0, cap1, ...):
- *    Allocates a closure Value and stores each captured variable
- *    in fields[0..ncaptures].
+ *    Allocates a closure; payload = [fn | cap0 | cap1 | ...]
  *
  *  apply(f, arg):
- *    Dispatches through f->fn.  Both f and arg are *owned* by
- *    this call (Perceus: the callee is responsible for dropping them).
+ *    Dispatches through the fn pointer in f's payload.
+ *    Both f and arg are owned by this call.
  * ─────────────────────────────────────────────────────────── */
 
 static inline Value *alloc_closure_0(LumiFn fn)
 {
-    Value *v = malloc(sizeof(Value));
-    v->rc = 1;
-    v->tag = TAG_CLOSURE;
-    v->nfields = 0;
-    v->fn = fn;
+    uint32_t size = (uint32_t)sizeof(LumiFn);
+    Value *v = malloc(sizeof(Value) + size);
+    v->rc = 1; v->tag = TAG_CLOSURE; v->size = size; v->_pad = 0;
+    *(LumiFn *)v->payload = fn;
     return v;
 }
 
-/* Variadic helper used by generated code — each capture is a Value*. */
 #include <stdarg.h>
 static Value *alloc_closure(LumiFn fn, uint32_t n, ...)
 {
-    Value *v = malloc(sizeof(Value) + n * sizeof(Value *));
-    v->rc = 1;
-    v->tag = TAG_CLOSURE;
-    v->nfields = n;
-    v->fn = fn;
+    uint32_t size = (uint32_t)sizeof(LumiFn) + n * (uint32_t)sizeof(Value *);
+    Value *v = malloc(sizeof(Value) + size);
+    v->rc = 1; v->tag = TAG_CLOSURE; v->size = size; v->_pad = 0;
+    *(LumiFn *)v->payload = fn;
+    Value **caps = (Value **)(v->payload + sizeof(LumiFn));
     va_list ap;
     va_start(ap, n);
     for (uint32_t i = 0; i < n; i++)
-        v->fields[i] = va_arg(ap, Value *);
+        caps[i] = va_arg(ap, Value *);
     va_end(ap);
     return v;
 }
 
 static inline Value *apply(Value *f, Value *arg)
 {
-    /* f is owned; the callee will rc_dec(_env) to release it. */
-    return f->fn(f, arg);
+    return (*(LumiFn *)f->payload)(f, arg);
 }
 
 /* ── Primitive value constructors ────────────────────────── */
 
-static Value LUMI_UNIT_VAL = {.rc = 0xFFFFFFFF, .tag = 0, .nfields = 0, .fn = NULL};
+static Value LUMI_UNIT_VAL  = {0xFFFFFFFF, TAG_UNIT,  0, 0};
+static Value LUMI_TRUE_VAL  = {0xFFFFFFFF, TAG_TRUE,  0, 0};
+static Value LUMI_FALSE_VAL = {0xFFFFFFFF, TAG_FALSE, 0, 0};
 
-static inline Value *lumi_unit(void) { return &LUMI_UNIT_VAL; }
-static inline Value *lumi_bool(int b) { return alloc_con(b ? TAG_TRUE : TAG_FALSE, 0); }
-static inline int lumi_is_true(Value *v) { return v && v->tag != 0; }
-static inline uint32_t tag_of(Value *v) { return v ? v->tag : 0; }
-static inline Value *field(Value *v, uint32_t i) { return v->fields[i]; }
+static inline Value *lumi_unit(void)  { return &LUMI_UNIT_VAL; }
+static inline Value *lumi_bool(int b) { return b ? &LUMI_TRUE_VAL : &LUMI_FALSE_VAL; }
+static inline int    lumi_is_true(Value *v) { return v && v->tag == TAG_TRUE; }
 
-/* Pins a value as an immortal global binding.  Immortal values are never
- * freed by rc_dec, so a recursive closure can apply() the global safely
- * without worrying about its RC reaching zero mid-recursion.
- * Call lumi_release_global() when done to reclaim the allocation. */
 static inline Value *lumi_global(Value *v)
 {
     v->rc = 0xFFFFFFFF;
@@ -183,21 +205,118 @@ static inline void lumi_release_global(Value *v)
 
 static inline Value *lumi_int(int64_t n)
 {
-    /* Boxes an integer.  A production compiler would use tagged pointers
-     * for small integers to avoid this allocation. */
-    Value *v = malloc(sizeof(Value) + sizeof(int64_t));
-    v->rc = 1;
-    v->tag = 0;
-    v->nfields = 0;
-    v->fn = NULL;
-    *(int64_t *)(v + 1) = n;
+    uint32_t size = (uint32_t)sizeof(int64_t);
+    Value *v = malloc(sizeof(Value) + size);
+    v->rc = 1; v->tag = TAG_INT; v->size = size; v->_pad = 0;
+    *(int64_t *)v->payload = n;
     return v;
+}
+
+static inline Value *lumi_str(const char *s)
+{
+    uint32_t size = (uint32_t)sizeof(const char *);
+    Value *v = malloc(sizeof(Value) + size);
+    v->rc = 1; v->tag = TAG_STR; v->size = size; v->_pad = 0;
+    *(const char **)v->payload = s;
+    return v;
+}
+
+/* ── Arithmetic ──────────────────────────────────────────── */
+
+static inline Value *int_add(Value *a, Value *b)
+{
+    int64_t result = *(int64_t *)a->payload + *(int64_t *)b->payload;
+    rc_dec(a); rc_dec(b);
+    return lumi_int(result);
 }
 
 noreturn static void lumi_panic(const char *msg)
 {
     fprintf(stderr, "lumi panic: %s\n", msg);
     exit(1);
+}
+
+/* ── Standard library: print and nat/list helpers ────────────
+ *  print() handles any Value* — tag determines the format.
+ * ─────────────────────────────────────────────────────────── */
+
+static inline Value *print_nl(void) { printf("\n"); return lumi_unit(); }
+
+static Value *print(Value *v)
+{
+    if (!v) { printf("NULL"); return lumi_unit(); }
+    switch (v->tag) {
+        case TAG_FALSE:  printf("False"); rc_dec(v); break;
+        case TAG_TRUE:   printf("True");  rc_dec(v); break;
+        case TAG_UNIT:   printf("()");    rc_dec(v); break;
+        case TAG_NIL:    printf("Nil");   rc_dec(v); break;
+        case TAG_ZERO:   printf("Zero");  rc_dec(v); break;
+        case TAG_INT:    printf("%lld", (long long)*(int64_t *)v->payload);
+                         rc_dec(v); break;
+        case TAG_STR:    printf("%s", *(const char **)v->payload);
+                         rc_dec(v); break;
+        case TAG_CONS: {
+            Value *head = field(v, 0); rc_inc(head);
+            Value *tail = field(v, 1); rc_inc(tail);
+            rc_dec(v);
+            printf("Cons("); print(head); printf(", "); print(tail); printf(")");
+            break;
+        }
+        case TAG_SUCC: {
+            Value *inner = field(v, 0); rc_inc(inner);
+            rc_dec(v);
+            printf("Succ("); print(inner); printf(")");
+            break;
+        }
+        case TAG_CLOSURE: printf("<fn>"); rc_dec(v); break;
+        default:          printf("?tag=%u", v->tag); rc_dec(v); break;
+    }
+    return lumi_unit();
+}
+
+static int nat_to_int(Value *v)
+{
+    int n = 0;
+    while (v && v->tag == TAG_SUCC) { n++; v = field(v, 0); }
+    return n;
+}
+
+static Value *make_nat(int n)
+{
+    Value *v = alloc_con(TAG_ZERO, 0);
+    for (int i = 0; i < n; i++) {
+        Value *s = alloc_con(TAG_SUCC, 1);
+        set_field(s, 0, v);
+        v = s;
+    }
+    return v;
+}
+
+static Value *list_cons(Value *head, Value *tail)
+{
+    Value *c = alloc_con(TAG_CONS, 2);
+    set_field(c, 0, head);
+    set_field(c, 1, tail);
+    return c;
+}
+
+static Value *print_nat_list(Value *v)
+{
+    printf("[");
+    int first = 1;
+    while (v && v->tag == TAG_CONS) {
+        if (!first) printf(", ");
+        first = 0;
+        Value *head = field(v, 0); rc_inc(head);
+        Value *tail = field(v, 1); rc_inc(tail);
+        rc_dec(v);
+        printf("%d", nat_to_int(head));
+        rc_dec(head);
+        v = tail;
+    }
+    if (v) rc_dec(v);
+    printf("]");
+    return lumi_unit();
 }
 
 #endif /* LUMI_RUNTIME_H */

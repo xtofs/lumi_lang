@@ -17,7 +17,7 @@ use crate::rc_ast::{RcExpr, RcMatchArm};
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /// Full output: runtime header + lifted closures + entry-point functions.
-pub fn emit_program(functions: &[(&str, &RcExpr)]) -> String {
+pub fn emit_program(functions: &[(String, RcExpr)]) -> String {
     let mut cg = Codegen::new();
     cg.lifted.push_str(C_RUNTIME);
     let bodies = emit_bodies(&mut cg, functions);
@@ -25,33 +25,57 @@ pub fn emit_program(functions: &[(&str, &RcExpr)]) -> String {
 }
 
 /// Full compilable translation unit: runtime header + file-scope globals for
-/// `recursive_names` (so recursive self-references inside closures resolve) +
-/// lifted closures + entry-point functions.
-///
-/// Recursive globals are declared `static Value* <name>;`.  The caller's
-/// `main()` must assign them (as immortal values) before any application.
-pub fn emit_c_file(functions: &[(&str, &RcExpr)], recursive_names: &[&str]) -> String {
+/// every non-entry function (immortal, to support cross-references and recursion)
+/// + lifted closures + entry-point functions + `int main(void)` that initialises
+/// each non-entry function as an immortal global, calls the entry, then cleans up.
+pub fn emit_c_file(functions: &[(String, RcExpr)], entry: Option<&str>) -> String {
     let mut cg = Codegen::new();
     cg.lifted.push_str("#include \"lumi_runtime.h\"\n\n");
-    for name in recursive_names {
-        cg.lifted.push_str(&format!("static Value* {name};\n"));
+    for (name, _) in functions {
+        if Some(name.as_str()) != entry {
+            cg.lifted.push_str(&format!("static Value* {name};\n"));
+        }
     }
-    if !recursive_names.is_empty() {
-        cg.lifted.push('\n');
-    }
+    cg.lifted.push('\n');
+
     let bodies = emit_bodies(&mut cg, functions);
-    cg.lifted + &bodies
+
+    if let Some(entry_name) = entry {
+        let mut fw = FnWriter::new(0);
+        fw.line("int main(void) {");
+        fw.indent += 1;
+        for (name, _) in functions {
+            if name != entry_name {
+                fw.line(&format!("{name} = lumi_global(lumi_{name}());"));
+            }
+        }
+        fw.line("");
+        fw.line(&format!("Value* _result = lumi_{entry_name}();"));
+        fw.line("rc_dec(_result);");
+        fw.line("");
+        for (name, _) in functions {
+            if name != entry_name {
+                fw.line(&format!("lumi_release_global({name});"));
+            }
+        }
+        fw.line("return 0;");
+        fw.indent -= 1;
+        fw.line("}");
+        cg.lifted + &bodies + &fw.finish()
+    } else {
+        cg.lifted + &bodies
+    }
 }
 
 /// Only the generated portion (lifted closures + entry-point functions),
 /// without the runtime header.  Useful for display / diffing.
-pub fn emit_body_only(functions: &[(&str, &RcExpr)]) -> String {
+pub fn emit_body_only(functions: &[(String, RcExpr)]) -> String {
     let mut cg = Codegen::new();
     let bodies = emit_bodies(&mut cg, functions);
     cg.lifted + &bodies
 }
 
-fn emit_bodies(cg: &mut Codegen, functions: &[(&str, &RcExpr)]) -> String {
+fn emit_bodies(cg: &mut Codegen, functions: &[(String, RcExpr)]) -> String {
     let mut bodies = String::new();
     for (name, expr) in functions {
         bodies.push_str(&cg.emit_function(name, expr));
@@ -61,6 +85,18 @@ fn emit_bodies(cg: &mut Codegen, functions: &[(&str, &RcExpr)]) -> String {
 }
 
 // ── Codegen state ─────────────────────────────────────────────────────────────
+
+fn rc_comment(label: &str, expr: &RcExpr) -> String {
+    let mut buf = Vec::new();
+    let _ = expr.pp(&mut buf);
+    let text = String::from_utf8_lossy(&buf);
+    let mut out = format!("/* {label}:\n");
+    for line in text.lines() {
+        out.push_str(&format!(" *   {line}\n"));
+    }
+    out.push_str(" */");
+    out
+}
 
 struct Codegen {
     /// Accumulated lifted closure functions (forward decls + definitions).
@@ -87,6 +123,7 @@ impl Codegen {
 
     fn emit_function(&mut self, name: &str, expr: &RcExpr) -> String {
         let mut fw = FnWriter::new(0);
+        fw.line(&rc_comment(&format!("Lumi {name}"), expr));
         fw.line(&format!("Value* lumi_{name}(void) {{"));
         fw.indent += 1;
         let result = self.emit_expr(expr, &mut fw);
@@ -105,6 +142,14 @@ impl Codegen {
             RcExpr::Lit(Lit::Int(n)) => format!("lumi_int({n})"),
             RcExpr::Lit(Lit::Bool(b)) => format!("lumi_bool({})", *b as i32),
             RcExpr::Lit(Lit::Unit) => "lumi_unit()".to_string(),
+            RcExpr::Lit(Lit::Str(s)) => {
+                let t = fw.tmp();
+                fw.line(&format!(
+                    "Value* {t} = lumi_str(\"{}\");",
+                    s.escape_default()
+                ));
+                t
+            }
 
             // ── Variable ─────────────────────────────────────────────────────
             RcExpr::Var(x) => x.clone(),
@@ -138,6 +183,7 @@ impl Codegen {
                 let fn_name = self.fresh_name("_fn_");
                 self.lift_lambda(&fn_name, param, captures, body);
 
+                fw.line("/* declaration */");
                 // Build the closure allocation call.
                 let n = captures.len();
                 let t = fw.tmp();
@@ -214,8 +260,16 @@ impl Codegen {
                     fw.line(&format!("Value* {t} = alloc_con(TAG_{tag_upper}, {n});"));
                 }
                 for (i, fv) in field_temps.iter().enumerate() {
-                    fw.line(&format!("{t}->fields[{i}] = {fv};"));
+                    fw.line(&format!("set_field({t}, {i}, {fv});"));
                 }
+                t
+            }
+
+            // ── Foreign call ─────────────────────────────────────────────────
+            RcExpr::Foreign { name, args } => {
+                let arg_vals: Vec<String> = args.iter().map(|a| self.emit_expr(a, fw)).collect();
+                let t = fw.tmp();
+                fw.line(&format!("Value* {t} = {name}({});", arg_vals.join(", ")));
                 t
             }
         }
@@ -226,11 +280,14 @@ impl Codegen {
     fn lift_lambda(&mut self, fn_name: &str, param: &str, captures: &[String], body: &RcExpr) {
         // Forward declaration (allows mutual recursion among closures).
         self.lifted.push_str(&format!(
-            "static Value* {fn_name}(Value* _env, Value* _arg);\n"
+            "static Value* {fn_name}(Value* _env, Value* _arg);\n\n"
         ));
 
         // Emit the function body into a fresh FnWriter.
         let mut fw = FnWriter::new(0);
+
+        fw.line(&rc_comment(&format!("Lumi {fn_name}"), body));
+
         fw.line(&format!(
             "static Value* {fn_name}(Value* _env, Value* _arg) {{"
         ));
@@ -241,7 +298,7 @@ impl Codegen {
         // (which decrements each field by 1), netting zero change in RC.
         for (i, cap) in captures.iter().enumerate() {
             fw.line(&format!(
-                "Value* {cap} = _env->fields[{i}];  /* captured {cap} */"
+                "Value* {cap} = closure_cap(_env, {i});  /* captured {cap} */"
             ));
             fw.line(&format!("rc_inc({cap});"));
         }

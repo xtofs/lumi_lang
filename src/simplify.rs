@@ -22,7 +22,6 @@
 ///
 /// The commuting rules alone don't change observable behaviour, but they
 /// expose cancellation opportunities that a single-pass bottom-up scan misses.
-
 use crate::rc_ast::{RcExpr, RcMatchArm};
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -61,15 +60,17 @@ fn step(expr: RcExpr) -> RcExpr {
             body: Box::new(step(*body)),
         },
 
-        RcExpr::Lam { param, captures, body } => RcExpr::Lam {
+        RcExpr::Lam {
+            param,
+            captures,
+            body,
+        } => RcExpr::Lam {
             param,
             captures,
             body: Box::new(step(*body)),
         },
 
-        RcExpr::App(f, arg) => {
-            RcExpr::App(Box::new(step(*f)), Box::new(step(*arg)))
-        }
+        RcExpr::App(f, arg) => RcExpr::App(Box::new(step(*f)), Box::new(step(*arg))),
 
         RcExpr::If { cond, then_, else_ } => RcExpr::If {
             cond: Box::new(step(*cond)),
@@ -81,7 +82,10 @@ fn step(expr: RcExpr) -> RcExpr {
             scrutinee,
             arms: arms
                 .into_iter()
-                .map(|arm| RcMatchArm { body: step(arm.body), ..arm })
+                .map(|arm| RcMatchArm {
+                    body: step(arm.body),
+                    ..arm
+                })
                 .collect(),
         },
 
@@ -100,40 +104,56 @@ fn step(expr: RcExpr) -> RcExpr {
 fn reduce_dup(var: String, body: RcExpr) -> RcExpr {
     match body {
         // Dup(x, Drop(x, e))  →  e
-        RcExpr::Drop { var: ref v, body: ref e } if *v == var => step(*e.clone()),
+        RcExpr::Drop {
+            var: ref v,
+            body: ref e,
+        } if *v == var => step(*e.clone()),
 
         // Dead dup: x not mentioned anywhere in body
         ref b if !mentions(&var, b) => body,
 
         // Commute past Let when x is not used in the value expression.
         // This pushes the Dup closer to its use and may expose cancellation.
-        RcExpr::Let { name, value, body: inner } if !mentions(&var, &value) => {
-            RcExpr::Let {
-                name,
-                value,
-                body: Box::new(reduce_dup(var, *inner)),
-            }
-        }
+        RcExpr::Let {
+            name,
+            value,
+            body: inner,
+        } if !mentions(&var, &value) => RcExpr::Let {
+            name,
+            value,
+            body: Box::new(reduce_dup(var, *inner)),
+        },
 
-        body => RcExpr::Dup { var, body: Box::new(body) },
+        body => RcExpr::Dup {
+            var,
+            body: Box::new(body),
+        },
     }
 }
 
 fn reduce_drop(var: String, body: RcExpr) -> RcExpr {
     match body {
         // Drop(x, Dup(x, e))  →  e
-        RcExpr::Dup { var: ref v, body: ref e } if *v == var => step(*e.clone()),
+        RcExpr::Dup {
+            var: ref v,
+            body: ref e,
+        } if *v == var => step(*e.clone()),
 
         // Commute past Let when x is not used in the value expression.
-        RcExpr::Let { name, value, body: inner } if !mentions(&var, &value) => {
-            RcExpr::Let {
-                name,
-                value,
-                body: Box::new(reduce_drop(var, *inner)),
-            }
-        }
+        RcExpr::Let {
+            name,
+            value,
+            body: inner,
+        } if !mentions(&var, &value) => RcExpr::Let {
+            name,
+            value,
+            body: Box::new(reduce_drop(var, *inner)),
+        },
 
-        body => RcExpr::Drop { var, body: Box::new(body) },
+        body => RcExpr::Drop {
+            var,
+            body: Box::new(body),
+        },
     }
 }
 
@@ -155,9 +175,9 @@ fn mentions(var: &str, expr: &RcExpr) -> bool {
             mentions(var, value) || (name != var && mentions(var, body))
         }
 
-        RcExpr::Lam { param, captures, .. } => {
-            param != var && captures.iter().any(|c| c == var)
-        }
+        RcExpr::Lam {
+            param, captures, ..
+        } => param != var && captures.iter().any(|c| c == var),
 
         RcExpr::App(f, arg) => mentions(var, f) || mentions(var, arg),
 
@@ -169,13 +189,16 @@ fn mentions(var: &str, expr: &RcExpr) -> bool {
             scrutinee == var
                 || arms.iter().any(|arm| {
                     !arm.bindings.contains(&var.to_string())
-                        && (arm.reuse_token.as_deref() == Some(var)
-                            || mentions(var, &arm.body))
+                        && (arm.reuse_token.as_deref() == Some(var) || mentions(var, &arm.body))
                 })
         }
 
         RcExpr::Con { fields, reuse, .. } => {
             reuse.as_deref() == Some(var) || fields.iter().any(|f| mentions(var, f))
+        }
+        RcExpr::Foreign { args, .. } => {
+            // any arg
+            args.iter().any(|a| mentions(var, a))
         }
     }
 }
@@ -199,25 +222,54 @@ fn structurally_equal(a: &RcExpr, b: &RcExpr) -> bool {
             v1 == v2 && structurally_equal(b1, b2)
         }
         (
-            RcExpr::Let { name: n1, value: v1, body: b1 },
-            RcExpr::Let { name: n2, value: v2, body: b2 },
+            RcExpr::Let {
+                name: n1,
+                value: v1,
+                body: b1,
+            },
+            RcExpr::Let {
+                name: n2,
+                value: v2,
+                body: b2,
+            },
         ) => n1 == n2 && structurally_equal(v1, v2) && structurally_equal(b1, b2),
         (
-            RcExpr::Lam { param: p1, captures: c1, body: b1 },
-            RcExpr::Lam { param: p2, captures: c2, body: b2 },
+            RcExpr::Lam {
+                param: p1,
+                captures: c1,
+                body: b1,
+            },
+            RcExpr::Lam {
+                param: p2,
+                captures: c2,
+                body: b2,
+            },
         ) => p1 == p2 && c1 == c2 && structurally_equal(b1, b2),
         (RcExpr::App(f1, a1), RcExpr::App(f2, a2)) => {
             structurally_equal(f1, f2) && structurally_equal(a1, a2)
         }
         (
-            RcExpr::If { cond: c1, then_: t1, else_: e1 },
-            RcExpr::If { cond: c2, then_: t2, else_: e2 },
+            RcExpr::If {
+                cond: c1,
+                then_: t1,
+                else_: e1,
+            },
+            RcExpr::If {
+                cond: c2,
+                then_: t2,
+                else_: e2,
+            },
+        ) => structurally_equal(c1, c2) && structurally_equal(t1, t2) && structurally_equal(e1, e2),
+        (
+            RcExpr::Match {
+                scrutinee: s1,
+                arms: a1,
+            },
+            RcExpr::Match {
+                scrutinee: s2,
+                arms: a2,
+            },
         ) => {
-            structurally_equal(c1, c2)
-                && structurally_equal(t1, t2)
-                && structurally_equal(e1, e2)
-        }
-        (RcExpr::Match { scrutinee: s1, arms: a1 }, RcExpr::Match { scrutinee: s2, arms: a2 }) => {
             s1 == s2
                 && a1.len() == a2.len()
                 && a1.iter().zip(a2.iter()).all(|(arm1, arm2)| {
@@ -227,13 +279,29 @@ fn structurally_equal(a: &RcExpr, b: &RcExpr) -> bool {
                 })
         }
         (
-            RcExpr::Con { tag: t1, fields: f1, reuse: r1 },
-            RcExpr::Con { tag: t2, fields: f2, reuse: r2 },
+            RcExpr::Con {
+                tag: t1,
+                fields: f1,
+                reuse: r1,
+            },
+            RcExpr::Con {
+                tag: t2,
+                fields: f2,
+                reuse: r2,
+            },
         ) => {
             t1 == t2
                 && r1 == r2
                 && f1.len() == f2.len()
-                && f1.iter().zip(f2.iter()).all(|(a, b)| structurally_equal(a, b))
+                && f1
+                    .iter()
+                    .zip(f2.iter())
+                    .all(|(a, b)| structurally_equal(a, b))
+        }
+        (RcExpr::Foreign { name: n1, args: a1 }, RcExpr::Foreign { name: n2, args: a2 }) => {
+            n1 == n2
+                && a1.len() == a2.len()
+                && a1.iter().zip(a2.iter()).all(|(a, b)| structurally_equal(a, b))
         }
         _ => false,
     }

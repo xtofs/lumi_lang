@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-DEMOS="map inc_list and"
+DEMOS="map inc_list and make_tree"
 
 usage() {
     echo "Usage: $0 [demo]"

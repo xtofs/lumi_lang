@@ -6,6 +6,7 @@ pub enum Lit {
     Int(i64),
     Bool(bool),
     Unit,
+    Str(String),
 }
 
 #[derive(Debug, Clone)]
@@ -49,6 +50,11 @@ pub enum Expr {
     Con {
         tag: String,
         fields: Vec<Expr>,
+    },
+    /// Direct call to a named C function — escape hatch for I/O / arithmetic.
+    Foreign {
+        name: String,
+        args: Vec<Expr>,
     },
 }
 
@@ -102,6 +108,15 @@ impl Expr {
             fields,
         }
     }
+    pub fn str_(s: &str) -> Self {
+        Expr::Lit(Lit::Str(s.to_string()))
+    }
+    pub fn foreign(name: &str, args: Vec<Expr>) -> Self {
+        Expr::Foreign {
+            name: name.to_string(),
+            args,
+        }
+    }
 
     pub fn pp(&self, w: &mut dyn std::io::Write) -> std::io::Result<()> {
         self.pp_inner(w, false)?;
@@ -119,6 +134,7 @@ impl Expr {
                 Lit::Int(n) => write!(w, "{}", n)?,
                 Lit::Bool(b) => write!(w, "{}", b)?,
                 Lit::Unit => write!(w, "()")?,
+                Lit::Str(s) => write!(w, "\"{}\"", s)?,
             },
             Expr::Var(name) => write!(w, "{}", name)?,
             Expr::Lam { param, body } => {
@@ -170,6 +186,16 @@ impl Expr {
                     write!(w, ")")?;
                 }
             }
+            Expr::Foreign { name, args } => {
+                write!(w, "{}(", name)?;
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 {
+                        write!(w, ", ")?;
+                    }
+                    arg.pp_inner(w, false)?;
+                }
+                write!(w, ")")?;
+            }
         }
 
         if needs_parens {
@@ -198,6 +224,7 @@ impl Pattern {
                 Lit::Int(n) => write!(w, "{}", n)?,
                 Lit::Bool(b) => write!(w, "{}", b)?,
                 Lit::Unit => write!(w, "()")?,
+                Lit::Str(s) => write!(w, "\"{}\"", s)?,
             },
             Pattern::Con { tag, fields } => {
                 write!(w, "{}", tag)?;

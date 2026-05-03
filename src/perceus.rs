@@ -19,6 +19,19 @@ use crate::ast::{Expr, Pattern};
 use crate::liveness::{free_vars, free_vars_arm, pat_bindings, pat_bindings_ordered, use_count};
 use crate::rc_ast::{RcExpr, RcMatchArm};
 
+/// Transform every function through Perceus RC-insertion + simplification.
+/// Returns owned `(name, RcExpr)` pairs ready for codegen.
+pub fn compile_fns(functions: &[(&str, Expr)]) -> Vec<(String, RcExpr)> {
+    functions
+        .iter()
+        .map(|(name, expr)| {
+            let rc = transform(expr);
+            (name.to_string(), crate::simplify::simplify(rc))
+        })
+        .collect()
+}
+
+
 /// Entry point: transform a top-level expression.
 pub fn transform(expr: &Expr) -> RcExpr {
     // No variables are owned at the top level.
@@ -177,8 +190,7 @@ fn xform(expr: &Expr, owned: &HashSet<String>) -> RcExpr {
             }
         }
 
-        // ── Constructor ─────────────────────────────────────────────────────
-        // No reuse token at this point — reuse is attached by xform_match
+        // ── Constructor ─────────────────────────────────────────────────────        // No reuse token at this point — reuse is attached by xform_match
         // when a Con appears directly inside a match arm.
         //
         // Fields are evaluated left-to-right: if an owned variable appears
@@ -196,6 +208,25 @@ fn xform(expr: &Expr, owned: &HashSet<String>) -> RcExpr {
             vars.sort();
             for var in vars {
                 let uses = field_fvs.iter().filter(|fvs| fvs.contains(var)).count();
+                for _ in 1..uses {
+                    result = RcExpr::dup(var, result);
+                }
+            }
+            result
+        }
+
+        // ── Foreign call ────────────────────────────────────────────────────
+        // Identical Dup logic to Con: args evaluated left-to-right, owned vars
+        // shared across multiple args must be duplicated.
+        Expr::Foreign { name, args } => {
+            let arg_fvs: Vec<HashSet<String>> = args.iter().map(free_vars).collect();
+            let rc_args = args.iter().map(|a| xform(a, owned)).collect();
+            let mut result = RcExpr::Foreign { name: name.clone(), args: rc_args };
+
+            let mut vars: Vec<&String> = owned.iter().collect();
+            vars.sort();
+            for var in vars {
+                let uses = arg_fvs.iter().filter(|fvs| fvs.contains(var)).count();
                 for _ in 1..uses {
                     result = RcExpr::dup(var, result);
                 }

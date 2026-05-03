@@ -67,6 +67,12 @@ pub enum RcExpr {
         fields: Vec<RcExpr>,
         reuse: Option<ReuseToken>,
     },
+
+    /// Direct call to a named C function — escape hatch for I/O / arithmetic.
+    Foreign {
+        name: String,
+        args: Vec<RcExpr>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -111,7 +117,12 @@ impl RcExpr {
         let i1 = "  ".repeat(indent + 1);
         let i2 = "  ".repeat(indent + 2);
         match self {
-            RcExpr::Lit(lit) => write!(w, "{lit:?}"),
+            RcExpr::Lit(lit) => match lit {
+                Lit::Int(n) => write!(w, "{n}"),
+                Lit::Bool(b) => write!(w, "{b}"),
+                Lit::Unit => write!(w, "()"),
+                Lit::Str(s) => write!(w, "\"{s}\""),
+            },
             RcExpr::Var(name) => write!(w, "{name}"),
             RcExpr::Dup { var, body } => {
                 write!(w, "dup({var}); ")?;
@@ -127,7 +138,11 @@ impl RcExpr {
                 write!(w, "\n{i0}in\n{i1}")?;
                 body.pp_with_indent(w, indent + 1)
             }
-            RcExpr::Lam { param, captures, body } => {
+            RcExpr::Lam {
+                param,
+                captures,
+                body,
+            } => {
                 let caps = if captures.is_empty() {
                     String::new()
                 } else {
@@ -178,6 +193,16 @@ impl RcExpr {
                     f.pp_with_indent(w, indent)?;
                 }
                 write!(w, "){reuse}")
+            }
+            RcExpr::Foreign { name, args } => {
+                write!(w, "{name}(")?;
+                for (i, a) in args.iter().enumerate() {
+                    if i > 0 {
+                        write!(w, ", ")?;
+                    }
+                    a.pp_with_indent(w, indent)?;
+                }
+                write!(w, ")")
             }
         }
     }

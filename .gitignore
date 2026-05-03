@@ -75,3 +75,4 @@ Cargo.lock
 ### Custom, project specific ###
 
 out/**/*
+**/*.trace
