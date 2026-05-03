@@ -59,7 +59,14 @@ fn xform(expr: &Expr, owned: &HashSet<String>) -> RcExpr {
         }
 
         // ── Lambda ──────────────────────────────────────────────────────────
-        // The parameter is owned inside the body.
+        // The parameter is owned inside the body; everything else the body
+        // uses must be captured from the enclosing scope.
+        //
+        // We do NOT insert Dup nodes here for the captures.  Ownership
+        // flows into the closure from wherever `f` currently lives.
+        // If the *enclosing* context needs `f` to survive past the closure
+        // creation, it will insert the Dup (App, If, Con, and Match already
+        // do this for sub-expressions they share variables with).
         Expr::Lam { param, body } => {
             let mut body_owned = owned.clone();
             body_owned.insert(param.clone());
@@ -72,7 +79,17 @@ fn xform(expr: &Expr, owned: &HashSet<String>) -> RcExpr {
                 rc_body
             };
 
-            RcExpr::Lam { param: param.clone(), body: Box::new(rc_body) }
+            let mut captures: Vec<String> = free_vars(body)
+                .into_iter()
+                .filter(|v| v != param && owned.contains(v))
+                .collect();
+            captures.sort();
+
+            RcExpr::Lam {
+                param: param.clone(),
+                captures,
+                body: Box::new(rc_body),
+            }
         }
 
         // ── Application ─────────────────────────────────────────────────────
@@ -101,21 +118,13 @@ fn xform(expr: &Expr, owned: &HashSet<String>) -> RcExpr {
         }
 
         // ── If ──────────────────────────────────────────────────────────────
-        // Variables live in both branches must be Dup'd; variables live in
-        // only one branch are transferred into that branch (last use).
+        // Only one branch executes, so an owned variable used in BOTH branches
+        // needs NO dup — whichever branch fires consumes the single copy.
+        // A variable live in only one branch must be dropped in the other.
         Expr::If { cond, then_, else_ } => {
             let fvs_then = free_vars(then_);
             let fvs_else = free_vars(else_);
 
-            // Owned variables consumed in both branches need a dup.
-            let in_both: HashSet<String> = fvs_then
-                .intersection(&fvs_else)
-                .filter(|v| owned.contains(*v))
-                .cloned()
-                .collect();
-
-            // Variables dead after the condition but alive in only one branch
-            // need to be dropped in the other.
             let only_then: HashSet<String> = fvs_then
                 .difference(&fvs_else)
                 .filter(|v| owned.contains(*v))
@@ -132,7 +141,6 @@ fn xform(expr: &Expr, owned: &HashSet<String>) -> RcExpr {
             let mut rc_then = xform(then_, owned);
             let mut rc_else = xform(else_, owned);
 
-            // Drop variables that are alive in the else branch but not this one.
             for var in &only_else {
                 rc_then = RcExpr::drop_(var, rc_then);
             }
@@ -140,18 +148,11 @@ fn xform(expr: &Expr, owned: &HashSet<String>) -> RcExpr {
                 rc_else = RcExpr::drop_(var, rc_else);
             }
 
-            let mut result = RcExpr::If {
+            RcExpr::If {
                 cond: Box::new(rc_cond),
                 then_: Box::new(rc_then),
                 else_: Box::new(rc_else),
-            };
-
-            // Dup shared variables before the branch.
-            for var in &in_both {
-                result = RcExpr::dup(var, result);
             }
-
-            result
         }
 
         // ── Match ───────────────────────────────────────────────────────────
@@ -179,9 +180,27 @@ fn xform(expr: &Expr, owned: &HashSet<String>) -> RcExpr {
         // ── Constructor ─────────────────────────────────────────────────────
         // No reuse token at this point — reuse is attached by xform_match
         // when a Con appears directly inside a match arm.
+        //
+        // Fields are evaluated left-to-right: if an owned variable appears
+        // in multiple fields, it is consumed by the first field and then
+        // gone.  We must Dup it once for each extra field that uses it.
         Expr::Con { tag, fields } => {
+            let field_fvs: Vec<HashSet<String>> =
+                fields.iter().map(|f| free_vars(f)).collect();
+
             let rc_fields = fields.iter().map(|f| xform(f, owned)).collect();
-            RcExpr::Con { tag: tag.clone(), fields: rc_fields, reuse: None }
+            let mut result = RcExpr::Con { tag: tag.clone(), fields: rc_fields, reuse: None };
+
+            // Sort for determinism.
+            let mut vars: Vec<&String> = owned.iter().collect();
+            vars.sort();
+            for var in vars {
+                let uses = field_fvs.iter().filter(|fvs| fvs.contains(var)).count();
+                for _ in 1..uses {
+                    result = RcExpr::dup(var, result);
+                }
+            }
+            result
         }
     }
 }
@@ -197,51 +216,31 @@ fn xform_match(
     let arm_fvs: Vec<HashSet<String>> =
         arms.iter().map(|a| free_vars_arm(a)).collect();
 
-    // A variable that is free in multiple arms must be Dup'd once per
-    // extra arm that uses it.
+    // Only one arm fires, so there is no Dup for "variables used in other arms".
+    // Each arm either uses an owned variable (consumes it) or drops it.
     let rc_arms: Vec<RcMatchArm> = arms
         .iter()
         .enumerate()
         .map(|(i, arm)| {
             let this_fvs = &arm_fvs[i];
 
-            // Which owned variables are also needed by at least one other arm?
-            let needed_elsewhere: HashSet<String> = arm_fvs
-                .iter()
-                .enumerate()
-                .filter(|(j, _)| *j != i)
-                .flat_map(|(_, fvs)| fvs.iter().cloned())
-                .filter(|v| owned.contains(v) && this_fvs.contains(v))
-                .collect();
-
             let bindings = pat_bindings_ordered(&arm.pat);
-
-            // The reuse token: names the scrutinee's allocation.
-            // At runtime, if RC == 1 the allocation is recycled; otherwise
-            // a fresh malloc is used.  We always emit the token here and
-            // let the C runtime decide.
             let reuse_token = reuse_token_for(scrutinee, &arm.pat);
 
             let mut arm_owned = owned.clone();
             for b in &bindings {
                 arm_owned.insert(b.clone());
             }
-            // The scrutinee is consumed by the match; remove it from owned.
             arm_owned.remove(scrutinee);
 
             let mut rc_body = xform_with_reuse(&arm.body, &arm_owned, &reuse_token);
 
-            // Dup variables that are also consumed in other arms.
-            for var in &needed_elsewhere {
-                rc_body = RcExpr::dup(var, rc_body);
-            }
-
-            // Drop owned variables that are not used in this arm at all.
+            // Drop owned variables not used in this arm — they die here.
             for var in owned {
                 if var == scrutinee {
-                    continue; // handled via try_reuse in the match itself
+                    continue;
                 }
-                if !this_fvs.contains(var) && !needed_elsewhere.contains(var) {
+                if !this_fvs.contains(var) {
                     rc_body = RcExpr::drop_(var, rc_body);
                 }
             }
@@ -267,12 +266,25 @@ fn xform_with_reuse(
 ) -> RcExpr {
     match expr {
         Expr::Con { tag, fields } => {
+            let field_fvs: Vec<HashSet<String>> =
+                fields.iter().map(|f| free_vars(f)).collect();
+
             let rc_fields = fields.iter().map(|f| xform(f, owned)).collect();
-            RcExpr::Con {
+            let mut result = RcExpr::Con {
                 tag: tag.clone(),
                 fields: rc_fields,
                 reuse: reuse_token.clone(),
+            };
+
+            let mut vars: Vec<&String> = owned.iter().collect();
+            vars.sort();
+            for var in vars {
+                let uses = field_fvs.iter().filter(|fvs| fvs.contains(var)).count();
+                for _ in 1..uses {
+                    result = RcExpr::dup(var, result);
+                }
             }
+            result
         }
         _ => xform(expr, owned),
     }

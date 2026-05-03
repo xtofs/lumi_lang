@@ -24,6 +24,9 @@ pub enum RcExpr {
 
     Lam {
         param: String,
+        /// Variables captured from the enclosing scope.
+        /// Each one has already been Dup'd at the closure-creation site.
+        captures: Vec<String>,
         body: Box<RcExpr>,
     },
 
@@ -124,8 +127,13 @@ impl RcExpr {
                 write!(w, "\n{i0}in\n{i1}")?;
                 body.pp_with_indent(w, indent + 1)
             }
-            RcExpr::Lam { param, body } => {
-                write!(w, "λ{param} =>\n{i1}")?;
+            RcExpr::Lam { param, captures, body } => {
+                let caps = if captures.is_empty() {
+                    String::new()
+                } else {
+                    format!("[{}] ", captures.join(", "))
+                };
+                write!(w, "λ{caps}{param} =>\n{i1}")?;
                 body.pp_with_indent(w, indent + 1)
             }
             RcExpr::App(f, arg) => {
