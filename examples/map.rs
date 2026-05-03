@@ -7,9 +7,10 @@
 //!     }
 //!
 //! When `xs` is uniquely owned, Perceus reuses each Cons allocation.
-//! The lambda `λx. Succ(x)` passed as `f` is captured as a closure.
+//! The lambda `λx. int_add(x, 1)` passed as `f` exercises closure capture:
+//! `lumi_int1` (an immortal singleton) is captured and referenced on every call.
 
-use lumi::{emit_sample, expr_list, expr_nat, Expr, MatchArm, Pattern};
+use lumi::{emit_sample, expr_list, Expr, MatchArm, Pattern};
 
 fn main() {
     let map_fn = Expr::lam(
@@ -38,25 +39,33 @@ fn main() {
         ),
     );
 
-    let succ_fn = Expr::lam("x", Expr::con("Succ", vec![Expr::var("x")]));
+    // f = λx. int_add(x, 1)  — captures lumi_int1 (immortal singleton)
+    let inc_fn = Expr::lam(
+        "x",
+        Expr::foreign(
+            "int_add",
+            vec![Expr::var("x"), Expr::foreign("lumi_int1", vec![])],
+        ),
+    );
+
     let main = Expr::let_(
-        "_succ",
-        succ_fn,
+        "_inc",
+        inc_fn,
         Expr::let_(
             "_inp",
-            expr_list(vec![expr_nat(0), expr_nat(1), expr_nat(2)]),
+            expr_list(vec![Expr::int(0), Expr::int(1), Expr::int(2)]),
             Expr::let_(
                 "_l",
-                Expr::foreign("print", vec![Expr::str_("map succ [0,1,2] = ")]),
+                Expr::foreign("print", vec![Expr::str_("map (+1) [0,1,2] = ")]),
                 Expr::let_(
                     "_ms",
-                    Expr::app(Expr::var("map"), Expr::var("_succ")),
+                    Expr::app(Expr::var("map"), Expr::var("_inc")),
                     Expr::let_(
                         "_out",
                         Expr::app(Expr::var("_ms"), Expr::var("_inp")),
                         Expr::let_(
                             "_p",
-                            Expr::foreign("print_nat_list", vec![Expr::var("_out")]),
+                            Expr::foreign("print", vec![Expr::var("_out")]),
                             Expr::foreign("print_nl", vec![]),
                         ),
                     ),

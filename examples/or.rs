@@ -25,7 +25,7 @@ fn main() {
         ("or False True  = ", false, true),
         ("or False False = ", false, false),
     ];
-    let driver = cases
+    let main = cases
         .iter()
         .rev()
         .enumerate()
@@ -45,5 +45,5 @@ fn main() {
             )
         });
 
-    emit_sample("or", &[("or", or_fn), ("main", driver)], "main");
+    emit_sample("or", &[("or", or_fn), ("main", main)], "main");
 }

@@ -340,16 +340,22 @@ static Value *print(Value *v)
         break;
     case TAG_CONS:
     {
-        Value *head = field(v, 0);
-        rc_inc(head);
-        Value *tail = field(v, 1);
-        rc_inc(tail);
-        rc_dec(v);
-        printf("Cons(");
-        print(head);
-        printf(", ");
-        print(tail);
-        printf(")");
+        printf("[");
+        int _first = 1;
+        while (v && v->tag == TAG_CONS)
+        {
+            if (!_first) printf(", ");
+            _first = 0;
+            Value *head = field(v, 0);
+            rc_inc(head);
+            Value *tail = field(v, 1);
+            rc_inc(tail);
+            rc_dec(v);
+            print(head);
+            v = tail;
+        }
+        if (v) rc_dec(v);
+        printf("]");
         break;
     }
     case TAG_SUCC:
@@ -371,61 +377,6 @@ static Value *print(Value *v)
         rc_dec(v);
         break;
     }
-    return lumi_unit();
-}
-
-static int nat_to_int(Value *v)
-{
-    int n = 0;
-    while (v && v->tag == TAG_SUCC)
-    {
-        n++;
-        v = field(v, 0);
-    }
-    return n;
-}
-
-static Value *make_nat(int n)
-{
-    Value *v = alloc_con(TAG_ZERO, 0);
-    for (int i = 0; i < n; i++)
-    {
-        Value *s = alloc_con(TAG_SUCC, 1);
-        set_field(s, 0, v);
-        v = s;
-    }
-    return v;
-}
-
-static Value *list_cons(Value *head, Value *tail)
-{
-    Value *c = alloc_con(TAG_CONS, 2);
-    set_field(c, 0, head);
-    set_field(c, 1, tail);
-    return c;
-}
-
-static Value *print_nat_list(Value *v)
-{
-    printf("[");
-    int first = 1;
-    while (v && v->tag == TAG_CONS)
-    {
-        if (!first)
-            printf(", ");
-        first = 0;
-        Value *head = field(v, 0);
-        rc_inc(head);
-        Value *tail = field(v, 1);
-        rc_inc(tail);
-        rc_dec(v);
-        printf("%d", nat_to_int(head));
-        rc_dec(head);
-        v = tail;
-    }
-    if (v)
-        rc_dec(v);
-    printf("]");
     return lumi_unit();
 }
 

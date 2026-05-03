@@ -70,7 +70,7 @@ fn main() {
 
     let n = 20;
     let title = format!("sum_tree(tree({n})) = ");
-    let driver = Expr::let_(
+    let main = Expr::let_(
         "_l",
         Expr::foreign("print", vec![Expr::str_(&title)]),
         Expr::let_(
@@ -93,7 +93,7 @@ fn main() {
         &[
             ("tree", tree_fn),
             ("sum_tree", sum_tree_fn),
-            ("main", driver),
+            ("main", main),
         ],
         "main",
     );

@@ -3,13 +3,13 @@
 //!   inc_list xs =
 //!     match xs {
 //!       Nil        -> Nil
-//!       Cons(h, t) -> Cons(Succ(h), inc_list(t))
+//!       Cons(h, t) -> Cons(int_add(h, 1), inc_list(t))
 //!     }
 //!
 //! When `xs` is uniquely owned (RC == 1), each Cons cell is recycled in-place
 //! by the ReuseToken mechanism — no malloc per element.
 
-use lumi::{Expr, MatchArm, Pattern, emit_sample, expr_nat, expr_list};
+use lumi::{emit_sample, expr_list, Expr, MatchArm, Pattern};
 
 fn main() {
     let inc_list_fn = Expr::lam(
@@ -23,7 +23,10 @@ fn main() {
                     Expr::con(
                         "Cons",
                         vec![
-                            Expr::con("Succ", vec![Expr::var("h")]),
+                            Expr::foreign(
+                                "int_add",
+                                vec![Expr::var("h"), Expr::foreign("lumi_int1", vec![])],
+                            ),
                             Expr::app(Expr::var("inc_list"), Expr::var("t")),
                         ],
                     ),
@@ -32,9 +35,9 @@ fn main() {
         ),
     );
 
-    let driver = Expr::let_(
+    let main = Expr::let_(
         "_inp",
-        expr_list(vec![expr_nat(0), expr_nat(1), expr_nat(2), expr_nat(3)]),
+        expr_list(vec![Expr::int(0), Expr::int(1), Expr::int(2), Expr::int(3)]),
         Expr::let_(
             "_l",
             Expr::foreign("print", vec![Expr::str_("inc_list [0,1,2,3] = ")]),
@@ -43,12 +46,12 @@ fn main() {
                 Expr::app(Expr::var("inc_list"), Expr::var("_inp")),
                 Expr::let_(
                     "_p",
-                    Expr::foreign("print_nat_list", vec![Expr::var("_out")]),
+                    Expr::foreign("print", vec![Expr::var("_out")]),
                     Expr::foreign("print_nl", vec![]),
                 ),
             ),
         ),
     );
 
-    emit_sample("inc_list", &[("inc_list", inc_list_fn), ("main", driver)], "main");
+    emit_sample("inc_list", &[("inc_list", inc_list_fn), ("main", main)], "main");
 }
