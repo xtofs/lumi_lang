@@ -11,7 +11,7 @@ The crate is a **library** (`src/lib.rs`) with one Cargo example per demo:
 
 ```
 src/
-  lib.rs          — pub re-exports, emit_sample helper, expr_nat / expr_list
+  lib.rs          — pub re-exports, emit_sample helper, expr_list
   ast.rs          — source AST (Expr, Pattern, Lit, …)
   rc_ast.rs       — RC-annotated AST (RcExpr, Dup, Drop, ReuseToken, …)
   liveness.rs     — free-variable and use-count analysis
@@ -22,7 +22,7 @@ src/
 
 examples/
   or.rs           — `or a b = if a then a else b`
-  inc_list.rs     — `inc_list xs = map Succ xs` (allocation reuse)
+  inc_list.rs     — `inc_list xs = map (+1) xs` (allocation reuse, no HOF)
   map.rs          — higher-order `map` with closure capture
   tree.rs         — boxed integers, binary tree, `sum_tree`
 ```
@@ -202,10 +202,9 @@ Run with `./demo.sh` (or `./demo.sh <name>` for one demo).
 
 ## Open TODOs (`TODO/`)
 
-| File                    | Topic                                                                   |
-|-------------------------|-------------------------------------------------------------------------|
-| `multi-arg-lambda.md`   | Emit single multi-param C function instead of nested curried closures   |
-| `seq-expression.md`     | `Expr::seq` builder to flatten deeply nested `let _ = A in B` chains    |
-| `rename-drop-dup.md`    | Rename runtime calls to `lumi_drop`/`lumi_dup` for clarity              |
-| `immortality-flag.md`   | Use `RC_IMMORTAL = 0x80000000` sentinel instead of threshold `0xFFFF00` |
-| `primitive-integers.md` | Generalise machine-int support beyond the `tree` demo                   |
+| File                  | Topic                                                                   |
+|-----------------------|-------------------------------------------------------------------------|
+| `multi-arg-lambda.md` | Emit single multi-param C function instead of nested curried closures   |
+| `seq-expression.md`   | `Expr::seq` builder to flatten deeply nested `let _ = A in B` chains    |
+| `rename-drop-dup.md`  | Rename runtime calls to `lumi_drop`/`lumi_dup` for clarity              |
+| `immortality-flag.md` | Use `RC_IMMORTAL = 0x80000000` sentinel instead of threshold `0xFFFF00` |

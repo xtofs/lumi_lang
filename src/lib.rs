@@ -12,12 +12,6 @@ use std::io::{BufWriter, Write};
 
 // ── Shared expression builders ────────────────────────────────────────────────
 
-pub fn expr_nat(n: u32) -> Expr {
-    (0..n).fold(Expr::con("Zero", vec![]), |acc, _| {
-        Expr::con("Succ", vec![acc])
-    })
-}
-
 pub fn expr_list(items: Vec<Expr>) -> Expr {
     items
         .into_iter()
