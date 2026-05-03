@@ -15,7 +15,7 @@
 //! Perceus inserts Dup(n) before the If.
 //! LUMI_INT0 and LUMI_INT1 are immortal singletons (no malloc per call).
 
-use lumi::{Expr, MatchArm, Pattern, emit_sample};
+use lumi::{emit_sample, Expr, MatchArm, Pattern};
 
 fn main() {
     let tree_fn = Expr::lam(
@@ -68,7 +68,7 @@ fn main() {
         ),
     );
 
-    let n = 20;
+    let n = 26; // 26 has a runtime of about 10 seconds
     let title = format!("sum_tree(tree({n})) = ");
     let main = Expr::let_(
         "_l",
@@ -90,11 +90,7 @@ fn main() {
 
     emit_sample(
         "tree",
-        &[
-            ("tree", tree_fn),
-            ("sum_tree", sum_tree_fn),
-            ("main", main),
-        ],
+        &[("tree", tree_fn), ("sum_tree", sum_tree_fn), ("main", main)],
         "main",
     );
 }

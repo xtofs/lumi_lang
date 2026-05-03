@@ -17,7 +17,7 @@ run_demo() {
     echo "-- compiling C code"
     cc -std=c11 -o "out/$name" "out/$name.c" 2>&1
     echo "-- running example"
-    "./out/$name"
+    time "./out/$name"
 }
 
 if [ $# -eq 0 ]; then
