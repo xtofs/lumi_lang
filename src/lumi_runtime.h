@@ -31,28 +31,31 @@ typedef struct Value
 {
     uint32_t rc;
     uint32_t tag;
-    uint32_t size;   /* payload size in bytes */
-    uint32_t _pad;   /* alignment: keeps payload 8-byte aligned */
-    uint8_t  payload[];
+    uint32_t size; /* payload size in bytes */
+    uint32_t _pad; /* alignment: keeps payload 8-byte aligned */
+    uint8_t payload[];
 } Value;
 
 /* ── Reuse token ─────────────────────────────────────────── */
-typedef struct { Value *mem; } ReuseToken;
+typedef struct
+{
+    Value *mem;
+} ReuseToken;
 
 /* ── Constructor tags ────────────────────────────────────── */
 enum
 {
-    TAG_FALSE   = 0,
-    TAG_TRUE    = 1,
-    TAG_NIL     = 2,
-    TAG_CONS    = 3,
-    TAG_NONE    = 4,
-    TAG_SOME    = 5,
-    TAG_SUCC    = 6,
-    TAG_ZERO    = 7,
-    TAG_STR     = 8,
-    TAG_INT     = 9,
-    TAG_UNIT    = 10,
+    TAG_FALSE = 0,
+    TAG_TRUE = 1,
+    TAG_NIL = 2,
+    TAG_CONS = 3,
+    TAG_NONE = 4,
+    TAG_SOME = 5,
+    TAG_SUCC = 6,
+    TAG_ZERO = 7,
+    TAG_STR = 8,
+    TAG_INT = 9,
+    TAG_UNIT = 10,
     TAG_CLOSURE = 0xFFFFFFFE,
 };
 
@@ -60,7 +63,8 @@ enum
 
 static inline void rc_inc(Value *v)
 {
-    if (v) v->rc++;
+    if (v)
+        v->rc++;
 }
 
 static inline void rc_dec(Value *v)
@@ -69,20 +73,23 @@ static inline void rc_dec(Value *v)
         return; /* immortal */
     if (--v->rc == 0)
     {
-        if (v->tag == TAG_CLOSURE)
+        if (v->tag == TAG_CLOSURE) // decrement the captures variable values
         {
             /* Skip fn pointer; traverse captures */
             Value **caps = (Value **)(v->payload + sizeof(LumiFn));
-            uint32_t ncaps = (v->size - (uint32_t)sizeof(LumiFn))
-                             / (uint32_t)sizeof(Value *);
+            uint32_t ncaps = (v->size - (uint32_t)sizeof(LumiFn)) / (uint32_t)sizeof(Value *);
             for (uint32_t i = 0; i < ncaps; i++)
+            {
                 rc_dec(caps[i]);
+            }
         }
         else if (v->tag != TAG_INT && v->tag != TAG_STR)
         {
-            /* ADT constructor: entire payload is Value* fields */
-            Value **fields = (Value **)v->payload;
+            // everything but TAG_CLOSURE, TAG_INT and TAG_STR
+            // are using the payload as a field array.
+            // get and decrement the fields
             uint32_t nfields = v->size / (uint32_t)sizeof(Value *);
+            Value **fields = (Value **)v->payload;
             for (uint32_t i = 0; i < nfields; i++)
                 rc_dec(fields[i]);
         }
@@ -101,8 +108,10 @@ static inline void rc_dec(Value *v)
 
 static inline ReuseToken try_reuse(Value *v)
 {
-    if (!v)       return (ReuseToken){NULL};
-    if (v->rc==1) return (ReuseToken){v};
+    if (!v)
+        return (ReuseToken){NULL};
+    if (v->rc == 1)
+        return (ReuseToken){v};
     rc_dec(v);
     return (ReuseToken){NULL};
 }
@@ -110,16 +119,22 @@ static inline ReuseToken try_reuse(Value *v)
 static inline Value *reuse_con(ReuseToken tok, uint32_t tag, uint32_t nfields)
 {
     uint32_t size = nfields * (uint32_t)sizeof(Value *);
-    Value *v = tok.mem ? tok.mem : malloc(sizeof(Value) + size);
-    v->rc = 1; v->tag = tag; v->size = size; v->_pad = 0;
+    Value *v = tok.mem ? tok.mem : (Value *)malloc(sizeof(Value) + size);
+    v->rc = 1;
+    v->tag = tag;
+    v->size = size;
+    v->_pad = 0;
     return v;
 }
 
 static inline Value *alloc_con(uint32_t tag, uint32_t nfields)
 {
     uint32_t size = nfields * (uint32_t)sizeof(Value *);
-    Value *v = malloc(sizeof(Value) + size);
-    v->rc = 1; v->tag = tag; v->size = size; v->_pad = 0;
+    Value *v = (Value *)malloc(sizeof(Value) + size);
+    v->rc = 1;
+    v->tag = tag;
+    v->size = size;
+    v->_pad = 0;
     return v;
 }
 
@@ -155,8 +170,11 @@ static inline uint32_t tag_of(Value *v) { return v ? v->tag : 0; }
 static inline Value *alloc_closure_0(LumiFn fn)
 {
     uint32_t size = (uint32_t)sizeof(LumiFn);
-    Value *v = malloc(sizeof(Value) + size);
-    v->rc = 1; v->tag = TAG_CLOSURE; v->size = size; v->_pad = 0;
+    Value *v = (Value *)malloc(sizeof(Value) + size);
+    v->rc = 1;
+    v->tag = TAG_CLOSURE;
+    v->size = size;
+    v->_pad = 0;
     *(LumiFn *)v->payload = fn;
     return v;
 }
@@ -165,8 +183,11 @@ static inline Value *alloc_closure_0(LumiFn fn)
 static Value *alloc_closure(LumiFn fn, uint32_t n, ...)
 {
     uint32_t size = (uint32_t)sizeof(LumiFn) + n * (uint32_t)sizeof(Value *);
-    Value *v = malloc(sizeof(Value) + size);
-    v->rc = 1; v->tag = TAG_CLOSURE; v->size = size; v->_pad = 0;
+    Value *v = (Value *)malloc(sizeof(Value) + size);
+    v->rc = 1;
+    v->tag = TAG_CLOSURE;
+    v->size = size;
+    v->_pad = 0;
     *(LumiFn *)v->payload = fn;
     Value **caps = (Value **)(v->payload + sizeof(LumiFn));
     va_list ap;
@@ -184,13 +205,13 @@ static inline Value *apply(Value *f, Value *arg)
 
 /* ── Primitive value constructors ────────────────────────── */
 
-static Value LUMI_UNIT_VAL  = {0xFFFFFFFF, TAG_UNIT,  0, 0};
-static Value LUMI_TRUE_VAL  = {0xFFFFFFFF, TAG_TRUE,  0, 0};
+static Value LUMI_UNIT_VAL = {0xFFFFFFFF, TAG_UNIT, 0, 0};
+static Value LUMI_TRUE_VAL = {0xFFFFFFFF, TAG_TRUE, 0, 0};
 static Value LUMI_FALSE_VAL = {0xFFFFFFFF, TAG_FALSE, 0, 0};
 
-static inline Value *lumi_unit(void)  { return &LUMI_UNIT_VAL; }
+static inline Value *lumi_unit(void) { return &LUMI_UNIT_VAL; }
 static inline Value *lumi_bool(int b) { return b ? &LUMI_TRUE_VAL : &LUMI_FALSE_VAL; }
-static inline int    lumi_is_true(Value *v) { return v && v->tag == TAG_TRUE; }
+static inline int lumi_is_true(Value *v) { return v && v->tag == TAG_TRUE; }
 
 static inline Value *lumi_global(Value *v)
 {
@@ -206,8 +227,11 @@ static inline void lumi_release_global(Value *v)
 static inline Value *lumi_int(int64_t n)
 {
     uint32_t size = (uint32_t)sizeof(int64_t);
-    Value *v = malloc(sizeof(Value) + size);
-    v->rc = 1; v->tag = TAG_INT; v->size = size; v->_pad = 0;
+    Value *v = (Value *)malloc(sizeof(Value) + size);
+    v->rc = 1;
+    v->tag = TAG_INT;
+    v->size = size;
+    v->_pad = 0;
     *(int64_t *)v->payload = n;
     return v;
 }
@@ -215,8 +239,11 @@ static inline Value *lumi_int(int64_t n)
 static inline Value *lumi_str(const char *s)
 {
     uint32_t size = (uint32_t)sizeof(const char *);
-    Value *v = malloc(sizeof(Value) + size);
-    v->rc = 1; v->tag = TAG_STR; v->size = size; v->_pad = 0;
+    Value *v = (Value *)malloc(sizeof(Value) + size);
+    v->rc = 1;
+    v->tag = TAG_STR;
+    v->size = size;
+    v->_pad = 0;
     *(const char **)v->payload = s;
     return v;
 }
@@ -226,21 +253,24 @@ static inline Value *lumi_str(const char *s)
 static inline Value *int_add(Value *a, Value *b)
 {
     int64_t result = *(int64_t *)a->payload + *(int64_t *)b->payload;
-    rc_dec(a); rc_dec(b);
+    rc_dec(a);
+    rc_dec(b);
     return lumi_int(result);
 }
 
 static inline Value *int_sub(Value *a, Value *b)
 {
     int64_t result = *(int64_t *)a->payload - *(int64_t *)b->payload;
-    rc_dec(a); rc_dec(b);
+    rc_dec(a);
+    rc_dec(b);
     return lumi_int(result);
 }
 
 static inline Value *int_eq(Value *a, Value *b)
 {
     int result = *(int64_t *)a->payload == *(int64_t *)b->payload;
-    rc_dec(a); rc_dec(b);
+    rc_dec(a);
+    rc_dec(b);
     return lumi_bool(result);
 }
 
@@ -265,36 +295,81 @@ noreturn static void lumi_panic(const char *msg)
  *  print() handles any Value* — tag determines the format.
  * ─────────────────────────────────────────────────────────── */
 
-static inline Value *print_nl(void) { printf("\n"); return lumi_unit(); }
+static inline Value *print_nl(void)
+{
+    printf("\n");
+    return lumi_unit();
+}
 
 static Value *print(Value *v)
 {
-    if (!v) { printf("NULL"); return lumi_unit(); }
-    switch (v->tag) {
-        case TAG_FALSE:  printf("False"); rc_dec(v); break;
-        case TAG_TRUE:   printf("True");  rc_dec(v); break;
-        case TAG_UNIT:   printf("()");    rc_dec(v); break;
-        case TAG_NIL:    printf("Nil");   rc_dec(v); break;
-        case TAG_ZERO:   printf("Zero");  rc_dec(v); break;
-        case TAG_INT:    printf("%lld", (long long)*(int64_t *)v->payload);
-                         rc_dec(v); break;
-        case TAG_STR:    printf("%s", *(const char **)v->payload);
-                         rc_dec(v); break;
-        case TAG_CONS: {
-            Value *head = field(v, 0); rc_inc(head);
-            Value *tail = field(v, 1); rc_inc(tail);
-            rc_dec(v);
-            printf("Cons("); print(head); printf(", "); print(tail); printf(")");
-            break;
-        }
-        case TAG_SUCC: {
-            Value *inner = field(v, 0); rc_inc(inner);
-            rc_dec(v);
-            printf("Succ("); print(inner); printf(")");
-            break;
-        }
-        case TAG_CLOSURE: printf("<fn>"); rc_dec(v); break;
-        default:          printf("?tag=%u", v->tag); rc_dec(v); break;
+    if (!v)
+    {
+        printf("NULL");
+        return lumi_unit();
+    }
+    switch (v->tag)
+    {
+    case TAG_FALSE:
+        printf("False");
+        rc_dec(v);
+        break;
+    case TAG_TRUE:
+        printf("True");
+        rc_dec(v);
+        break;
+    case TAG_UNIT:
+        printf("()");
+        rc_dec(v);
+        break;
+    case TAG_NIL:
+        printf("Nil");
+        rc_dec(v);
+        break;
+    case TAG_ZERO:
+        printf("Zero");
+        rc_dec(v);
+        break;
+    case TAG_INT:
+        printf("%lld", (long long)*(int64_t *)v->payload);
+        rc_dec(v);
+        break;
+    case TAG_STR:
+        printf("%s", *(const char **)v->payload);
+        rc_dec(v);
+        break;
+    case TAG_CONS:
+    {
+        Value *head = field(v, 0);
+        rc_inc(head);
+        Value *tail = field(v, 1);
+        rc_inc(tail);
+        rc_dec(v);
+        printf("Cons(");
+        print(head);
+        printf(", ");
+        print(tail);
+        printf(")");
+        break;
+    }
+    case TAG_SUCC:
+    {
+        Value *inner = field(v, 0);
+        rc_inc(inner);
+        rc_dec(v);
+        printf("Succ(");
+        print(inner);
+        printf(")");
+        break;
+    }
+    case TAG_CLOSURE:
+        printf("<fn>");
+        rc_dec(v);
+        break;
+    default:
+        printf("?tag=%u", v->tag);
+        rc_dec(v);
+        break;
     }
     return lumi_unit();
 }
@@ -302,14 +377,19 @@ static Value *print(Value *v)
 static int nat_to_int(Value *v)
 {
     int n = 0;
-    while (v && v->tag == TAG_SUCC) { n++; v = field(v, 0); }
+    while (v && v->tag == TAG_SUCC)
+    {
+        n++;
+        v = field(v, 0);
+    }
     return n;
 }
 
 static Value *make_nat(int n)
 {
     Value *v = alloc_con(TAG_ZERO, 0);
-    for (int i = 0; i < n; i++) {
+    for (int i = 0; i < n; i++)
+    {
         Value *s = alloc_con(TAG_SUCC, 1);
         set_field(s, 0, v);
         v = s;
@@ -329,17 +409,22 @@ static Value *print_nat_list(Value *v)
 {
     printf("[");
     int first = 1;
-    while (v && v->tag == TAG_CONS) {
-        if (!first) printf(", ");
+    while (v && v->tag == TAG_CONS)
+    {
+        if (!first)
+            printf(", ");
         first = 0;
-        Value *head = field(v, 0); rc_inc(head);
-        Value *tail = field(v, 1); rc_inc(tail);
+        Value *head = field(v, 0);
+        rc_inc(head);
+        Value *tail = field(v, 1);
+        rc_inc(tail);
         rc_dec(v);
         printf("%d", nat_to_int(head));
         rc_dec(head);
         v = tail;
     }
-    if (v) rc_dec(v);
+    if (v)
+        rc_dec(v);
     printf("]");
     return lumi_unit();
 }

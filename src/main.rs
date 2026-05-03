@@ -41,10 +41,10 @@ fn expr_list(items: Vec<Expr>) -> Expr {
 
 fn and_main() -> Expr {
     let cases: &[(&str, bool, bool)] = &[
-        ("and True  True  = ", true, true),
-        ("and True  False = ", true, false),
-        ("and False True  = ", false, true),
-        ("and False False = ", false, false),
+        ("or True  True  = ", true, true),
+        ("or True  False = ", true, false),
+        ("or False True  = ", false, true),
+        ("or False False = ", false, false),
     ];
     cases
         .iter()
@@ -56,7 +56,7 @@ fn and_main() -> Expr {
                 Expr::foreign("print", vec![Expr::str_(label)]),
                 Expr::let_(
                     &format!("_r{i}"),
-                    Expr::app(Expr::app(Expr::var("and"), Expr::bool_(a)), Expr::bool_(b)),
+                    Expr::app(Expr::app(Expr::var("or"), Expr::bool_(a)), Expr::bool_(b)),
                     Expr::let_(
                         &format!("_sv{i}"),
                         Expr::foreign("print", vec![Expr::var(&format!("_r{i}"))]),
@@ -204,17 +204,19 @@ fn main() {
     );
     let inc_list_fn = Expr::lam("xs", inc_list_body);
 
-    // ── Example 3: and ───────────────────────────────────────────────────────
+    // ── Example 3: or ────────────────────────────────────────────────────────
     //
-    //   and a b = if a then b else False
+    //   or a b = if a then a else b
     //
-    // Demonstrates Drop in the untaken branch.
+    // Demonstrates both Perceus RC insertion cases in one function:
+    //   - `a` in condition AND then-branch → Dup(a) inserted before the If
+    //   - `b` only in else-branch          → Drop(b) inserted in then-branch
 
     let and_fn = Expr::lam(
         "a",
         Expr::lam(
             "b",
-            Expr::if_(Expr::var("a"), Expr::var("b"), Expr::con("False", vec![])),
+            Expr::if_(Expr::var("a"), Expr::var("a"), Expr::var("b")),
         ),
     );
 
@@ -287,8 +289,8 @@ fn main() {
 
     let samples = vec![
         Sample {
-            name: "and",
-            functions: vec![("and", and_fn), ("main", and_main())],
+            name: "or",
+            functions: vec![("or", and_fn), ("main", and_main())],
             entry: "main",
         },
         Sample {
