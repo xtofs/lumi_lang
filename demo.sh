@@ -13,7 +13,7 @@ usage() {
 run_demo() {
     name=$1
     echo "── $name ──────────────────────────────────────"
-    cargo run -q --example "$name" 2>/dev/null
+    cargo run -q --example "$name" 
     echo "-- compiling C code"
     cc -std=c11 -o "out/$name" "out/$name.c" 2>&1
     echo "-- running example"

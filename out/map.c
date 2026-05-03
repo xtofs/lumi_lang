@@ -1,0 +1,159 @@
+#include "lumi_runtime.h"
+
+static Value* map;
+
+static Value* _fn_1(Value* _env, Value* _arg);
+
+static Value* _fn_2(Value* _env, Value* _arg);
+
+/* Lumi _fn_2:
+ *   match xs
+ *     | Nil() [reuse: reuse_xs] =>
+ *       drop(f); Nil() [reuse: reuse_xs]
+ *     | Cons(h, t) [reuse: reuse_xs] =>
+ *       dup(f); Cons((f h), ((map f) t)) [reuse: reuse_xs]
+ */
+static Value* _fn_2(Value* _env, Value* _arg) {
+    Value* f = closure_cap(_env, 0);  /* captured f */
+    rc_inc(f);
+    rc_dec(_env);  /* release closure env */
+    Value* xs = _arg;
+    Value* _t1;
+    switch (tag_of(xs)) {
+        case TAG_NIL: {
+            ReuseToken reuse_xs = try_reuse(xs);/* RC==1 -> recycle; RC>1 -> NULL */
+            rc_dec(f);  /* drop f */
+            Value* _t2 = reuse_con(reuse_xs, TAG_NIL, 0);/* Perceus: reuse if RC==1 */
+            _t1 = _t2;
+            break;
+        }
+        case TAG_CONS: {
+            Value* h = field(xs, 0);  /* field 0 */
+            rc_inc(h);
+            Value* t = field(xs, 1);  /* field 1 */
+            rc_inc(t);
+            ReuseToken reuse_xs = try_reuse(xs);/* RC==1 -> recycle; RC>1 -> NULL */
+            rc_inc(f);  /* dup f */
+            Value* _t3 = apply(f, h);
+            Value* _t4 = apply(map, f);
+            Value* _t5 = apply(_t4, t);
+            Value* _t6 = reuse_con(reuse_xs, TAG_CONS, 2);/* Perceus: reuse if RC==1 */
+            set_field(_t6, 0, _t3);
+            set_field(_t6, 1, _t5);
+            _t1 = _t6;
+            break;
+        }
+        default: lumi_panic("unmatched"); break;
+    }
+    return _t1;
+}
+
+/* Lumi _fn_1:
+ *   λ[f] xs =>
+ *     match xs
+ *       | Nil() [reuse: reuse_xs] =>
+ *         drop(f); Nil() [reuse: reuse_xs]
+ *       | Cons(h, t) [reuse: reuse_xs] =>
+ *         dup(f); Cons((f h), ((map f) t)) [reuse: reuse_xs]
+ */
+static Value* _fn_1(Value* _env, Value* _arg) {
+    rc_dec(_env);  /* release closure env */
+    Value* f = _arg;
+    /* declaration */
+    Value* _t1 = alloc_closure(_fn_2, 1, f);
+
+    return _t1;
+}
+
+static Value* _fn_3(Value* _env, Value* _arg);
+
+/* Lumi _fn_3:
+ *   int_add(x, lumi_int1())
+ */
+static Value* _fn_3(Value* _env, Value* _arg) {
+    rc_dec(_env);  /* release closure env */
+    Value* x = _arg;
+    Value* _t1 = lumi_int1();
+    Value* _t2 = int_add(x, _t1);
+    return _t2;
+}
+
+/* Lumi map:
+ *   λf =>
+ *     λ[f] xs =>
+ *       match xs
+ *         | Nil() [reuse: reuse_xs] =>
+ *           drop(f); Nil() [reuse: reuse_xs]
+ *         | Cons(h, t) [reuse: reuse_xs] =>
+ *           dup(f); Cons((f h), ((map f) t)) [reuse: reuse_xs]
+ */
+Value* lumi_map(void) {
+    /* declaration */
+    Value* _t1 = alloc_closure(_fn_1, 0);
+
+    return _t1;
+}
+
+/* Lumi main:
+ *   let _inc =
+ *     λx =>
+ *       int_add(x, lumi_int1())
+ *   in
+ *     let _inp =
+ *       Cons(0, Cons(1, Cons(2, Nil())))
+ *     in
+ *       let _l =
+ *         print("map (+1) [0,1,2] = ")
+ *       in
+ *         let _ms =
+ *           (map _inc)
+ *         in
+ *           let _out =
+ *             (_ms _inp)
+ *           in
+ *             let _p =
+ *               print(_out)
+ *             in
+ *               drop(_l); drop(_p); print_nl()
+ */
+Value* lumi_main(void) {
+    /* declaration */
+    Value* _t1 = alloc_closure(_fn_3, 0);
+
+    Value* _inc = _t1;
+    Value* _t2 = alloc_con(TAG_NIL, 0);
+    Value* _t3 = alloc_con(TAG_CONS, 2);
+    set_field(_t3, 0, lumi_int(2));
+    set_field(_t3, 1, _t2);
+    Value* _t4 = alloc_con(TAG_CONS, 2);
+    set_field(_t4, 0, lumi_int(1));
+    set_field(_t4, 1, _t3);
+    Value* _t5 = alloc_con(TAG_CONS, 2);
+    set_field(_t5, 0, lumi_int(0));
+    set_field(_t5, 1, _t4);
+    Value* _inp = _t5;
+    Value* _t6 = lumi_str("map (+1) [0,1,2] = ");
+    Value* _t7 = print(_t6);
+    Value* _l = _t7;
+    Value* _t8 = apply(map, _inc);
+    Value* _ms = _t8;
+    Value* _t9 = apply(_ms, _inp);
+    Value* _out = _t9;
+    Value* _t10 = print(_out);
+    Value* _p = _t10;
+    rc_dec(_l);  /* drop _l */
+    rc_dec(_p);  /* drop _p */
+    Value* _t11 = print_nl();
+    return _t11;
+}
+
+int main(void) {
+    lumi_runtime_init();
+    map = lumi_global(lumi_map());
+    
+    Value* _result = lumi_main();
+    rc_dec(_result);
+    
+    lumi_release_global(map);
+    return 0;
+}

@@ -4,7 +4,7 @@
 /// operation is made explicit. The Perceus algorithm decides *where* to
 /// insert Dup and Drop so the user never has to.
 use crate::ast::Lit;
-use crate::PrettyPrintStyle;
+use crate::lib::PrettyPrintStyle;
 
 /// A reuse token names the memory of a just-deconstructed value.
 /// If the token is "live" (RC was 1 at deconstruction time), the
@@ -149,7 +149,11 @@ impl Expr {
                 write!(w, " in ")?;
                 body.pp_inner(w, false)?
             }
-            Expr::Lam { param, captures, body } => {
+            Expr::Lam {
+                param,
+                captures,
+                body,
+            } => {
                 let caps = if captures.is_empty() {
                     String::new()
                 } else {
@@ -200,8 +204,7 @@ impl Expr {
                     }
                     f.pp_inner(w, false)?;
                 }
-                write!(w, "){reuse}")?;
-                Ok(())
+                write!(w, "){reuse}")
             }
             Expr::Foreign { name, args } => {
                 write!(w, "{name}(")?;
@@ -210,11 +213,6 @@ impl Expr {
                         write!(w, ", ")?;
                     }
                     a.pp_inner(w, false)?;
-                }
-                write!(w, ")")?;
-                Ok(())
-            }
-        }
                 }
                 write!(w, ")")
             }

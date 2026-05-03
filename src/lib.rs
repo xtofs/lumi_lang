@@ -51,16 +51,16 @@ pub fn emit_sample(name: &str, functions: &[(&str, Expr)], entry: &str) {
 
         for (fname, expr) in functions {
             writeln!(w, "─── Source AST: {fname} ───────────────────────").unwrap();
-            expr.pp(&mut w, PrettyPrintStyle::Indented).unwrap();
+            expr.pp(&mut w).unwrap();
 
             let rc_expr = perceus::transform(expr);
             writeln!(w, "\n─── After Perceus RC insertion ───────────────").unwrap();
-            rc_expr.pp(&mut w, PrettyPrintStyle::Indented).unwrap();
+            rc_expr.pp(&mut w).unwrap();
 
             let simplified = simplify::simplify(rc_expr.clone());
             if !simplify::structurally_equal_pub(&simplified, &rc_expr) {
                 writeln!(w, "\n─── After simplification ─────────────────────").unwrap();
-                simplified.pp(&mut w, PrettyPrintStyle::Indented).unwrap();
+                simplified.pp(&mut w).unwrap();
             }
             writeln!(w).unwrap();
         }

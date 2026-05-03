@@ -74,5 +74,5 @@ Cargo.lock
 
 ### Custom, project specific ###
 
-lumi/out/**/*
+**/out/**/*
 **/*.trace
