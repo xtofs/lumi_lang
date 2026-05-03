@@ -22,10 +22,10 @@
 ///
 /// The commuting rules alone don't change observable behaviour, but they
 /// expose cancellation opportunities that a single-pass bottom-up scan misses.
-use crate::rc_ast::MatchArm;
+use crate::rc::MatchArm;
 // use crate::rc_ast as rc
 mod rc {
-    pub use crate::rc_ast::Expr;
+    pub use crate::rc::Expr;
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────

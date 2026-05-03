@@ -19,7 +19,7 @@ use crate::liveness::{free_vars, free_vars_arm, pat_bindings_ordered, use_count}
 
 // use crate::rc_ast as rc
 mod rc {
-    pub use crate::rc_ast::{Expr, MatchArm};
+    pub use crate::rc::{Expr, MatchArm};
 }
 
 /// Transform every function through Perceus RC-insertion + simplification.

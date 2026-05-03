@@ -8,8 +8,12 @@ static Value* _fn_2(Value* _env, Value* _arg);
 
 /* Lumi _fn_2:
  *   dup(a); if a
- *   then drop(b); a
- *   else drop(a); b
+ *    then drop(b); a
+ *   
+ *    else drop(a); b
+ *   
+ *   
+ *   
  */
 static Value* _fn_2(Value* _env, Value* _arg) {
     Value* a = closure_cap(_env, 0);  /* captured a */
@@ -31,10 +35,14 @@ static Value* _fn_2(Value* _env, Value* _arg) {
 }
 
 /* Lumi _fn_1:
- *   λ[a] b =>
- *     dup(a); if a
- *     then drop(b); a
- *     else drop(a); b
+ *   λ[a] b => dup(a); if a
+ *    then drop(b); a
+ *   
+ *    else drop(a); b
+ *   
+ *   
+ *   
+ *   
  */
 static Value* _fn_1(Value* _env, Value* _arg) {
     rc_dec(_env);  /* release closure env */
@@ -46,11 +54,15 @@ static Value* _fn_1(Value* _env, Value* _arg) {
 }
 
 /* Lumi or:
- *   λa =>
- *     λ[a] b =>
- *       dup(a); if a
- *       then drop(b); a
- *       else drop(a); b
+ *   λa => λ[a] b => dup(a); if a
+ *    then drop(b); a
+ *   
+ *    else drop(a); b
+ *   
+ *   
+ *   
+ *   
+ *   
  */
 Value* lumi_or(void) {
     /* declaration */
@@ -60,55 +72,75 @@ Value* lumi_or(void) {
 }
 
 /* Lumi main:
- *   let _sl3 =
- *     print("or True  True  = ")
- *   in
- *     let _r3 =
- *       ((or true) true)
- *     in
- *       let _sv3 =
- *         print(_r3)
- *       in
- *         let _sn3 =
- *           print_nl()
- *         in
- *           let _sl2 =
- *             print("or True  False = ")
- *           in
- *             let _r2 =
- *               ((or true) false)
- *             in
- *               let _sv2 =
- *                 print(_r2)
- *               in
- *                 let _sn2 =
- *                   print_nl()
- *                 in
- *                   let _sl1 =
- *                     print("or False True  = ")
- *                   in
- *                     let _r1 =
- *                       ((or false) true)
- *                     in
- *                       let _sv1 =
- *                         print(_r1)
- *                       in
- *                         let _sn1 =
- *                           print_nl()
- *                         in
- *                           let _sl0 =
- *                             print("or False False = ")
- *                           in
- *                             let _r0 =
- *                               ((or false) false)
- *                             in
- *                               let _sv0 =
- *                                 print(_r0)
- *                               in
- *                                 let _sn0 =
- *                                   print_nl()
- *                                 in
- *                                   drop(_sl3); drop(_sv3); drop(_sn3); drop(_sl2); drop(_sv2); drop(_sn2); drop(_sl1); drop(_sv1); drop(_sn1); drop(_sl0); drop(_sv0); drop(_sn0); ()
+ *   let _sl3 = print("or True  True  = "
+ *   )
+ *    in let _r3 = or
+ *    true
+ *   
+ *    true
+ *   
+ *    in let _sv3 = print(_r3
+ *   )
+ *    in let _sn3 = print_nl()
+ *    in let _sl2 = print("or True  False = "
+ *   )
+ *    in let _r2 = or
+ *    true
+ *   
+ *    false
+ *   
+ *    in let _sv2 = print(_r2
+ *   )
+ *    in let _sn2 = print_nl()
+ *    in let _sl1 = print("or False True  = "
+ *   )
+ *    in let _r1 = or
+ *    false
+ *   
+ *    true
+ *   
+ *    in let _sv1 = print(_r1
+ *   )
+ *    in let _sn1 = print_nl()
+ *    in let _sl0 = print("or False False = "
+ *   )
+ *    in let _r0 = or
+ *    false
+ *   
+ *    false
+ *   
+ *    in let _sv0 = print(_r0
+ *   )
+ *    in let _sn0 = print_nl()
+ *    in drop(_sl3); drop(_sv3); drop(_sn3); drop(_sl2); drop(_sv2); drop(_sn2); drop(_sl1); drop(_sv1); drop(_sn1); drop(_sl0); drop(_sv0); drop(_sn0); ()
+ *   
+ *   
+ *   
+ *   
+ *   
+ *   
+ *   
+ *   
+ *   
+ *   
+ *   
+ *   
+ *   
+ *   
+ *   
+ *   
+ *   
+ *   
+ *   
+ *   
+ *   
+ *   
+ *   
+ *   
+ *   
+ *   
+ *   
+ *   
  */
 Value* lumi_main(void) {
     Value* _t1 = lumi_str("or True  True  = ");

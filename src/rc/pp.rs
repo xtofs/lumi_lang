@@ -1,132 +1,14 @@
-/// RC-annotated AST — output of the Perceus transform.
-///
-/// This is an intermediate representation where every reference-counting
-/// operation is made explicit. The Perceus algorithm decides *where* to
-/// insert Dup and Drop so the user never has to.
+use super::Expr;
+
 use crate::ast::Lit;
-use crate::PrettyPrintStyle;
-
-/// A reuse token names the memory of a just-deconstructed value.
-/// If the token is "live" (RC was 1 at deconstruction time), the
-/// Con node that consumes it can skip malloc and write into that slot.
-pub type ReuseToken = String;
-
-#[derive(Debug, Clone)]
-pub enum Expr {
-    Lit(Lit),
-
-    Var(String),
-
-    Let {
-        name: String,
-        value: Box<Expr>,
-        body: Box<Expr>,
-    },
-
-    Lam {
-        param: String,
-        /// Variables captured from the enclosing scope.
-        /// Each one has already been Dup'd at the closure-creation site.
-        captures: Vec<String>,
-        body: Box<Expr>,
-    },
-
-    App(Box<Expr>, Box<Expr>),
-
-    If {
-        cond: Box<Expr>,
-        then_: Box<Expr>,
-        else_: Box<Expr>,
-    },
-
-    /// rc_inc(var); evaluate body.
-    /// Inserted when a variable is shared across multiple uses.
-    Dup {
-        var: String,
-        body: Box<Expr>,
-    },
-
-    /// rc_dec(var); evaluate body.
-    /// Inserted when a variable goes out of scope without being consumed.
-    Drop {
-        var: String,
-        body: Box<Expr>,
-    },
-
-    /// Pattern match. The scrutinee is *consumed* (ownership transferred in).
-    /// Each arm may carry a ReuseToken for the scrutinee's freed allocation.
-    Match {
-        scrutinee: String,
-        arms: Vec<MatchArm>,
-    },
-
-    /// Constructor call.
-    /// If `reuse` is Some(token), the emitted C reuses that allocation
-    /// instead of calling malloc — the core Perceus optimisation.
-    Con {
-        tag: String,
-        fields: Vec<Expr>,
-        reuse: Option<ReuseToken>,
-    },
-
-    /// Direct call to a named C function — escape hatch for I/O / arithmetic.
-    Foreign {
-        name: String,
-        args: Vec<Expr>,
-    },
-}
-
-#[derive(Debug, Clone)]
-pub struct MatchArm {
-    /// The constructor tag this arm matches (or "_" for wildcard).
-    pub tag: String,
-    /// Field variables extracted from the matched constructor.
-    pub bindings: Vec<String>,
-    /// Reuse token for the scrutinee's allocation, usable by a Con in this arm.
-    pub reuse_token: Option<ReuseToken>,
-    pub body: Expr,
-}
-
-// ── Builder helpers ───────────────────────────────────────────────────────────
 
 impl Expr {
-    pub fn var(name: &str) -> Self {
-        Expr::Var(name.to_string())
-    }
-
-    pub fn dup(var: &str, body: Expr) -> Self {
-        Expr::Dup {
-            var: var.to_string(),
-            body: Box::new(body),
-        }
-    }
-
-    pub fn drop_(var: &str, body: Expr) -> Self {
-        Expr::Drop {
-            var: var.to_string(),
-            body: Box::new(body),
-        }
-    }
-
-    pub fn pp(&self, w: &mut dyn std::io::Write, style: PrettyPrintStyle) -> std::io::Result<()> {
-        match style {
-            PrettyPrintStyle::SingleLine => {
-                self.pp_inner(w, false)?;
-                writeln!(w)
-            }
-            PrettyPrintStyle::Indented => {
-                self.pp_with_indent(w, 0)?;
-                writeln!(w)
-            }
-        }
-    }
-
-    fn pp_inner(&self, w: &mut dyn std::io::Write, parens: bool) -> std::io::Result<()> {
-        let needs_parens = parens && matches!(self, Expr::Lam { .. } | Expr::App(_, _));
+    pub fn print(&self, w: &mut dyn std::io::Write) -> std::io::Result<()> {
+        // Inline the logic of pp_inner for single line output
+        let needs_parens = false && matches!(self, Expr::Lam { .. } | Expr::App(_, _));
         if needs_parens {
             write!(w, "(")?;
         }
-
         match self {
             Expr::Lit(lit) => match lit {
                 Lit::Int(n) => write!(w, "{}", n)?,
@@ -137,39 +19,49 @@ impl Expr {
             Expr::Var(name) => write!(w, "{}", name)?,
             Expr::Dup { var, body } => {
                 write!(w, "dup({var}); ")?;
-                body.pp_inner(w, false)?
+                body.print(w)?;
+                ()
             }
             Expr::Drop { var, body } => {
                 write!(w, "drop({var}); ")?;
-                body.pp_inner(w, false)?
+                body.print(w)?;
+                ()
             }
             Expr::Let { name, value, body } => {
                 write!(w, "let {} = ", name)?;
-                value.pp_inner(w, false)?;
+                value.print(w)?;
                 write!(w, " in ")?;
-                body.pp_inner(w, false)?
+                body.print(w)?;
+                ()
             }
-            Expr::Lam { param, captures, body } => {
+            Expr::Lam {
+                param,
+                captures,
+                body,
+            } => {
                 let caps = if captures.is_empty() {
                     String::new()
                 } else {
                     format!("[{}] ", captures.join(", "))
                 };
                 write!(w, "λ{caps}{param} => ")?;
-                body.pp_inner(w, false)?
+                body.print(w)?;
+                ()
             }
             Expr::App(f, arg) => {
-                f.pp_inner(w, true)?;
+                f.print(w)?;
                 write!(w, " ")?;
-                arg.pp_inner(w, true)?
+                arg.print(w)?;
+                ()
             }
             Expr::If { cond, then_, else_ } => {
                 write!(w, "if ")?;
-                cond.pp_inner(w, false)?;
+                cond.print(w)?;
                 write!(w, " then ")?;
-                then_.pp_inner(w, false)?;
+                then_.print(w)?;
                 write!(w, " else ")?;
-                else_.pp_inner(w, false)?
+                else_.print(w)?;
+                ()
             }
             Expr::Match { scrutinee, arms } => {
                 write!(w, "match {scrutinee} with ")?;
@@ -184,9 +76,9 @@ impl Expr {
                         .map(|t| format!(" [reuse: {t}]"))
                         .unwrap_or_default();
                     write!(w, "{}({}){} => ", arm.tag, bindings, reuse)?;
-                    arm.body.pp_inner(w, false)?;
+                    arm.body.print(w)?;
                 }
-                Ok(())
+                ()
             }
             Expr::Con { tag, fields, reuse } => {
                 let reuse = reuse
@@ -198,10 +90,10 @@ impl Expr {
                     if i > 0 {
                         write!(w, ", ")?;
                     }
-                    f.pp_inner(w, false)?;
+                    f.print(w)?;
                 }
                 write!(w, "){reuse}")?;
-                Ok(())
+                ()
             }
             Expr::Foreign { name, args } => {
                 write!(w, "{name}(")?;
@@ -209,21 +101,18 @@ impl Expr {
                     if i > 0 {
                         write!(w, ", ")?;
                     }
-                    a.pp_inner(w, false)?;
+                    a.print(w)?;
                 }
                 write!(w, ")")?;
-                Ok(())
+                ()
             }
         }
-                }
-                write!(w, ")")
-            }
-        }
+        writeln!(w)
+    }
 
-        if needs_parens {
-            write!(w, ")")?;
-        }
-        Ok(())
+    pub fn pretty_print(&self, w: &mut dyn std::io::Write) -> std::io::Result<()> {
+        self.pp_with_indent(w, 0)?;
+        writeln!(w)
     }
 
     fn pp_with_indent(&self, w: &mut dyn std::io::Write, indent: usize) -> std::io::Result<()> {
@@ -231,26 +120,30 @@ impl Expr {
         let i1 = "  ".repeat(indent + 1);
         let i2 = "  ".repeat(indent + 2);
         match self {
-            Expr::Lit(lit) => match lit {
-                Lit::Int(n) => write!(w, "{n}"),
-                Lit::Bool(b) => write!(w, "{b}"),
-                Lit::Unit => write!(w, "()"),
-                Lit::Str(s) => write!(w, "\"{s}\""),
-            },
-            Expr::Var(name) => write!(w, "{name}"),
+            Expr::Lit(lit) => {
+                match lit {
+                    Lit::Int(n) => write!(w, "{n}"),
+                    Lit::Bool(b) => write!(w, "{b}"),
+                    Lit::Unit => write!(w, "()"),
+                    Lit::Str(s) => write!(w, "\"{s}\""),
+                }?;
+            }
+            Expr::Var(name) => {
+                write!(w, "{name}")?;
+            }
             Expr::Dup { var, body } => {
                 write!(w, "dup({var}); ")?;
-                body.pp_with_indent(w, indent)
+                body.pp_with_indent(w, indent)?;
             }
             Expr::Drop { var, body } => {
                 write!(w, "drop({var}); ")?;
-                body.pp_with_indent(w, indent)
+                body.pp_with_indent(w, indent)?;
             }
             Expr::Let { name, value, body } => {
                 write!(w, "let {name} =\n{i1}")?;
                 value.pp_with_indent(w, indent + 1)?;
                 write!(w, "\n{i0}in\n{i1}")?;
-                body.pp_with_indent(w, indent + 1)
+                body.pp_with_indent(w, indent + 1)?;
             }
             Expr::Lam {
                 param,
@@ -263,14 +156,14 @@ impl Expr {
                     format!("[{}] ", captures.join(", "))
                 };
                 write!(w, "λ{caps}{param} =>\n{i1}")?;
-                body.pp_with_indent(w, indent + 1)
+                body.pp_with_indent(w, indent + 1)?;
             }
             Expr::App(f, arg) => {
                 write!(w, "(")?;
                 f.pp_with_indent(w, indent)?;
                 write!(w, " ")?;
                 arg.pp_with_indent(w, indent)?;
-                write!(w, ")")
+                write!(w, ")")?;
             }
             Expr::If { cond, then_, else_ } => {
                 write!(w, "if ")?;
@@ -278,7 +171,7 @@ impl Expr {
                 write!(w, "\n{i0}then ")?;
                 then_.pp_with_indent(w, indent)?;
                 write!(w, "\n{i0}else ")?;
-                else_.pp_with_indent(w, indent)
+                else_.pp_with_indent(w, indent)?;
             }
             Expr::Match { scrutinee, arms } => {
                 write!(w, "match {scrutinee}")?;
@@ -292,7 +185,6 @@ impl Expr {
                     write!(w, "\n{i1}| {}({bindings}){reuse} =>\n{i2}", arm.tag)?;
                     arm.body.pp_with_indent(w, indent + 2)?;
                 }
-                Ok(())
             }
             Expr::Con { tag, fields, reuse } => {
                 let reuse = reuse
@@ -306,7 +198,7 @@ impl Expr {
                     }
                     f.pp_with_indent(w, indent)?;
                 }
-                write!(w, "){reuse}")
+                write!(w, "){reuse}")?;
             }
             Expr::Foreign { name, args } => {
                 write!(w, "{name}(")?;
@@ -316,8 +208,9 @@ impl Expr {
                     }
                     a.pp_with_indent(w, indent)?;
                 }
-                write!(w, ")")
+                write!(w, ")")?;
             }
         }
+        Ok(())
     }
 }

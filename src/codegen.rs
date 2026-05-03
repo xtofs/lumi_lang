@@ -12,10 +12,10 @@
 /// On entry, the closure body extracts each captured variable from `_env`,
 /// increments its RC, then decrements `_env` (which may free the closure).
 use crate::ast::Lit;
-use crate::rc_ast::MatchArm;
+use crate::rc::MatchArm;
 // use crate::rc_ast as rc
 mod rc {
-    pub use crate::rc_ast::Expr;
+    pub use crate::rc::Expr;
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -93,7 +93,8 @@ fn emit_bodies(cg: &mut Codegen, functions: &[(String, rc::Expr)]) -> String {
 
 fn rc_comment(label: &str, expr: &rc::Expr) -> String {
     let mut buf = Vec::new();
-    let _ = expr.pp(&mut buf, crate::PrettyPrintStyle::Indented);
+    // using single line print for comment
+    let _ = expr.print(&mut buf);
     let text = String::from_utf8_lossy(&buf);
     let mut out = format!("/* {label}:\n");
     for line in text.lines() {

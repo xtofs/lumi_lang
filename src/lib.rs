@@ -1,15 +1,8 @@
-/// Pretty printing style for ASTs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PrettyPrintStyle {
-    Indented,
-    SingleLine,
-}
-
 pub mod ast;
 pub mod codegen;
 pub mod liveness;
 pub mod perceus;
-pub mod rc_ast;
+pub mod rc;
 pub mod simplify;
 
 pub use ast::{Expr, MatchArm, Pattern};
@@ -51,16 +44,16 @@ pub fn emit_sample(name: &str, functions: &[(&str, Expr)], entry: &str) {
 
         for (fname, expr) in functions {
             writeln!(w, "─── Source AST: {fname} ───────────────────────").unwrap();
-            expr.pp(&mut w).unwrap();
+            expr.pretty_print(&mut w).unwrap();
 
             let rc_expr = perceus::transform(expr);
             writeln!(w, "\n─── After Perceus RC insertion ───────────────").unwrap();
-            rc_expr.pp(&mut w).unwrap();
+            rc_expr.pretty_print(&mut w).unwrap();
 
             let simplified = simplify::simplify(rc_expr.clone());
             if !simplify::structurally_equal_pub(&simplified, &rc_expr) {
                 writeln!(w, "\n─── After simplification ─────────────────────").unwrap();
-                simplified.pp(&mut w).unwrap();
+                simplified.pretty_print(&mut w).unwrap();
             }
             writeln!(w).unwrap();
         }
