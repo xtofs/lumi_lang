@@ -1,0 +1,5 @@
+{
+    "files.exclude": {
+        "lumi/src/lumi_runtime.h": true
+    }
+}
