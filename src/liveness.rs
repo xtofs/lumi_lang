@@ -1,4 +1,4 @@
-use crate::ast::{Expr, Lit, MatchArm, Pattern};
+use crate::ast::{Expr, MatchArm, Pattern};
 /// Liveness / use-count analysis on the source AST.
 ///
 /// Perceus needs to know, for each variable at each program point:

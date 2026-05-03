@@ -12,11 +12,10 @@
 ///
 /// Reference: "Perceus: Garbage Free Reference Counting with Reuse"
 ///            Reijnders & Leijen, MSR-TR-2020-42.
-
 use std::collections::HashSet;
 
 use crate::ast::{Expr, Pattern};
-use crate::liveness::{free_vars, free_vars_arm, pat_bindings, pat_bindings_ordered, use_count};
+use crate::liveness::{free_vars, free_vars_arm, pat_bindings_ordered, use_count};
 use crate::rc_ast::{RcExpr, RcMatchArm};
 
 /// Transform every function through Perceus RC-insertion + simplification.
@@ -30,7 +29,6 @@ pub fn compile_fns(functions: &[(&str, Expr)]) -> Vec<(String, RcExpr)> {
         })
         .collect()
 }
-
 
 /// Entry point: transform a top-level expression.
 pub fn transform(expr: &Expr) -> RcExpr {
@@ -222,11 +220,14 @@ fn xform(expr: &Expr, owned: &HashSet<String>) -> RcExpr {
         // in multiple fields, it is consumed by the first field and then
         // gone.  We must Dup it once for each extra field that uses it.
         Expr::Con { tag, fields } => {
-            let field_fvs: Vec<HashSet<String>> =
-                fields.iter().map(|f| free_vars(f)).collect();
+            let field_fvs: Vec<HashSet<String>> = fields.iter().map(|f| free_vars(f)).collect();
 
             let rc_fields = fields.iter().map(|f| xform(f, owned)).collect();
-            let mut result = RcExpr::Con { tag: tag.clone(), fields: rc_fields, reuse: None };
+            let mut result = RcExpr::Con {
+                tag: tag.clone(),
+                fields: rc_fields,
+                reuse: None,
+            };
 
             // Sort for determinism.
             let mut vars: Vec<&String> = owned.iter().collect();
@@ -246,7 +247,10 @@ fn xform(expr: &Expr, owned: &HashSet<String>) -> RcExpr {
         Expr::Foreign { name, args } => {
             let arg_fvs: Vec<HashSet<String>> = args.iter().map(free_vars).collect();
             let rc_args = args.iter().map(|a| xform(a, owned)).collect();
-            let mut result = RcExpr::Foreign { name: name.clone(), args: rc_args };
+            let mut result = RcExpr::Foreign {
+                name: name.clone(),
+                args: rc_args,
+            };
 
             let mut vars: Vec<&String> = owned.iter().collect();
             vars.sort();
@@ -263,14 +267,9 @@ fn xform(expr: &Expr, owned: &HashSet<String>) -> RcExpr {
 
 // ── Match helper ─────────────────────────────────────────────────────────────
 
-fn xform_match(
-    scrutinee: &str,
-    arms: &[crate::ast::MatchArm],
-    owned: &HashSet<String>,
-) -> RcExpr {
+fn xform_match(scrutinee: &str, arms: &[crate::ast::MatchArm], owned: &HashSet<String>) -> RcExpr {
     // Collect free variables per arm (excluding the arm's own bindings).
-    let arm_fvs: Vec<HashSet<String>> =
-        arms.iter().map(|a| free_vars_arm(a)).collect();
+    let arm_fvs: Vec<HashSet<String>> = arms.iter().map(|a| free_vars_arm(a)).collect();
 
     // Only one arm fires, so there is no Dup for "variables used in other arms".
     // Each arm either uses an owned variable (consumes it) or drops it.
@@ -303,11 +302,19 @@ fn xform_match(
 
             let tag = arm_tag(&arm.pat);
 
-            RcMatchArm { tag, bindings, reuse_token, body: rc_body }
+            RcMatchArm {
+                tag,
+                bindings,
+                reuse_token,
+                body: rc_body,
+            }
         })
         .collect();
 
-    RcExpr::Match { scrutinee: scrutinee.to_string(), arms: rc_arms }
+    RcExpr::Match {
+        scrutinee: scrutinee.to_string(),
+        arms: rc_arms,
+    }
 }
 
 /// Like `xform`, but if the expression is a `Con` and we have a reuse token,
@@ -315,15 +322,10 @@ fn xform_match(
 ///
 /// This is the heart of Perceus: the compiler threads the reuse token from
 /// the match arm directly into the constructor call, eliminating malloc.
-fn xform_with_reuse(
-    expr: &Expr,
-    owned: &HashSet<String>,
-    reuse_token: &Option<String>,
-) -> RcExpr {
+fn xform_with_reuse(expr: &Expr, owned: &HashSet<String>, reuse_token: &Option<String>) -> RcExpr {
     match expr {
         Expr::Con { tag, fields } => {
-            let field_fvs: Vec<HashSet<String>> =
-                fields.iter().map(|f| free_vars(f)).collect();
+            let field_fvs: Vec<HashSet<String>> = fields.iter().map(|f| free_vars(f)).collect();
 
             let rc_fields = fields.iter().map(|f| xform(f, owned)).collect();
             let mut result = RcExpr::Con {
