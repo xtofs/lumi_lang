@@ -5,6 +5,33 @@ The pipeline takes a hand-built expression AST, inserts RC operations, and emits
 
 ---
 
+## Crate layout
+
+The crate is a **library** (`src/lib.rs`) with one Cargo example per demo:
+
+```
+src/
+  lib.rs          — pub re-exports, emit_sample helper, expr_nat / expr_list
+  ast.rs          — source AST (Expr, Pattern, Lit, …)
+  rc_ast.rs       — RC-annotated AST (RcExpr, Dup, Drop, ReuseToken, …)
+  liveness.rs     — free-variable and use-count analysis
+  perceus.rs      — Perceus RC-insertion pass
+  simplify.rs     — algebraic simplification (fixed-point)
+  codegen.rs      — C code generator
+  lumi_runtime.h  — C runtime (Value struct, RC primitives, stdlib)
+
+examples/
+  or.rs           — `or a b = if a then a else b`
+  inc_list.rs     — `inc_list xs = map Succ xs` (allocation reuse)
+  map.rs          — higher-order `map` with closure capture
+  tree.rs         — boxed integers, binary tree, `sum_tree`
+```
+
+Run a single demo: `cargo run --example <name>`  
+Run all demos:    `./demo.sh` (or `./demo.sh <name>`)
+
+---
+
 ## Pipeline
 
 ```
@@ -15,6 +42,10 @@ Expr (ast.rs)
 ```
 
 Each stage is a pure function over its AST type; no mutable global state.
+
+`lib::emit_sample(name, functions, entry)` runs the full pipeline and writes
+`out/<name>.txt` (debug dump) and `out/<name>.c` (compilable C). Each example
+calls this once.
 
 ---
 

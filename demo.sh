@@ -13,12 +13,10 @@ usage() {
 run_demo() {
     name=$1
     echo "── $name ──────────────────────────────────────"
+    cargo run -q --example "$name" 2>/dev/null
     cc -std=c11 -o "out/$name" "out/$name.c" 2>&1
     "./out/$name"
 }
-
-# Regenerate all .c files once
-cargo run -q 2>/dev/null
 
 if [ $# -eq 0 ]; then
     for name in $DEMOS; do
