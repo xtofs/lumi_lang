@@ -119,10 +119,10 @@ fn map_main() -> Expr {
 fn tree_main() -> Expr {
     Expr::let_(
         "_l",
-        Expr::foreign("print", vec![Expr::str_("sum_tree(make_tree 7)) = ")]),
+        Expr::foreign("print", vec![Expr::str_("sum_tree(tree 24)) = ")]),
         Expr::let_(
             "_t",
-            Expr::app(Expr::var("make_tree"), expr_nat(7)),
+            Expr::app(Expr::var("tree"), expr_nat(24)),
             Expr::let_(
                 "_s",
                 Expr::app(Expr::var("sum_tree"), Expr::var("_t")),
@@ -141,7 +141,7 @@ fn driver(name: &str) -> Expr {
         "and" => and_main(),
         "inc_list" => inc_list_main(),
         "map" => map_main(),
-        "make_tree" => tree_main(),
+        "tree" => tree_main(),
         _ => panic!("no driver for '{name}'"),
     }
 }
@@ -215,15 +215,15 @@ fn main() {
         ),
     );
 
-    // ── Example 4: make_tree ─────────────────────────────────────────────────
+    // ── Example 4: tree ─────────────────────────────────────────────────
     //
-    //   make_tree n =
+    //   tree n =
     //     match n {
     //       Zero()  -> Zero()
-    //       Succ(m) -> Cons(make_tree(m), make_tree(m))
+    //       Succ(m) -> Cons(tree(m), tree(m))
     //     }
     //
-    // Perceus inserts Dup(make_tree) and Dup(m) in the Succ arm
+    // Perceus inserts Dup(tree) and Dup(m) in the Succ arm
     // because both are used twice — building a complete binary tree.
 
     let tree_body = Expr::match_(
@@ -235,8 +235,8 @@ fn main() {
                 Expr::con(
                     "Cons",
                     vec![
-                        Expr::app(Expr::var("make_tree"), Expr::var("m")),
-                        Expr::app(Expr::var("make_tree"), Expr::var("m")),
+                        Expr::app(Expr::var("tree"), Expr::var("m")),
+                        Expr::app(Expr::var("tree"), Expr::var("m")),
                     ],
                 ),
             ),
@@ -289,9 +289,9 @@ fn main() {
             entry: "main",
         },
         Sample {
-            name: "make_tree",
+            name: "tree",
             functions: vec![
-                ("make_tree", tree_fn),
+                ("tree", tree_fn),
                 ("sum_tree", sum_tree_fn),
                 ("main", tree_main()),
             ],
