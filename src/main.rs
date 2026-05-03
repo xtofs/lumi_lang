@@ -117,12 +117,15 @@ fn map_main() -> Expr {
 }
 
 fn tree_main() -> Expr {
+    let n = 20;
+    let title = &format!("sum_tree(tree({n})) = ");
+
     Expr::let_(
         "_l",
-        Expr::foreign("print", vec![Expr::str_("sum_tree(tree 24)) = ")]),
+        Expr::foreign("print", vec![Expr::str_(title)]),
         Expr::let_(
             "_t",
-            Expr::app(Expr::var("tree"), expr_nat(24)),
+            Expr::app(Expr::var("tree"), Expr::int(n)),
             Expr::let_(
                 "_s",
                 Expr::app(Expr::var("sum_tree"), Expr::var("_t")),
@@ -218,31 +221,41 @@ fn main() {
     // ── Example 4: tree ─────────────────────────────────────────────────
     //
     //   tree n =
-    //     match n {
-    //       Zero()  -> Zero()
-    //       Succ(m) -> Cons(tree(m), tree(m))
-    //     }
+    //     if int_eq(n, 0) then Zero()
+    //     else Cons(tree(int_sub(n, 1)), tree(int_sub(n, 1)))
     //
-    // Perceus inserts Dup(tree) and Dup(m) in the Succ arm
-    // because both are used twice — building a complete binary tree.
+    // Uses boxed machine integers instead of Peano Nat.
+    // Perceus inserts Dup(n) in the else branch because n is used twice.
 
-    let tree_body = Expr::match_(
-        Expr::var("n"),
-        vec![
-            MatchArm::new(Pattern::con("Zero", vec![]), Expr::con("Zero", vec![])),
-            MatchArm::new(
-                Pattern::con("Succ", vec![Pattern::var("m")]),
-                Expr::con(
-                    "Cons",
-                    vec![
-                        Expr::app(Expr::var("tree"), Expr::var("m")),
-                        Expr::app(Expr::var("tree"), Expr::var("m")),
-                    ],
-                ),
+    let tree_fn = Expr::lam(
+        "n",
+        Expr::if_(
+            Expr::foreign(
+                "int_eq",
+                vec![Expr::var("n"), Expr::foreign("lumi_int0", vec![])],
             ),
-        ],
+            Expr::con("Zero", vec![]),
+            Expr::con(
+                "Cons",
+                vec![
+                    Expr::app(
+                        Expr::var("tree"),
+                        Expr::foreign(
+                            "int_sub",
+                            vec![Expr::var("n"), Expr::foreign("lumi_int1", vec![])],
+                        ),
+                    ),
+                    Expr::app(
+                        Expr::var("tree"),
+                        Expr::foreign(
+                            "int_sub",
+                            vec![Expr::var("n"), Expr::foreign("lumi_int1", vec![])],
+                        ),
+                    ),
+                ],
+            ),
+        ),
     );
-    let tree_fn = Expr::lam("n", tree_body);
 
     // ── Example 5: sum_tree ──────────────────────────────────────────────────
     //

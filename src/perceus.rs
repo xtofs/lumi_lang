@@ -134,25 +134,39 @@ fn xform(expr: &Expr, owned: &HashSet<String>) -> RcExpr {
         // Only one branch executes, so an owned variable used in BOTH branches
         // needs NO dup — whichever branch fires consumes the single copy.
         // A variable live in only one branch must be dropped in the other.
+        //
+        // Cond complication: cond is evaluated first and may consume owned vars.
+        // If a var is consumed by cond AND needed by a branch, it must be Dup'd
+        // before the whole If. Vars exclusively consumed by cond are removed from
+        // the owned set passed to the branches.
         Expr::If { cond, then_, else_ } => {
+            let fvs_cond = free_vars(cond);
             let fvs_then = free_vars(then_);
             let fvs_else = free_vars(else_);
 
+            // branch_owned: remove vars consumed only by cond (not needed by branches)
+            let mut branch_owned = owned.clone();
+            for v in &fvs_cond {
+                if owned.contains(v) && !fvs_then.contains(v) && !fvs_else.contains(v) {
+                    branch_owned.remove(v);
+                }
+            }
+
             let only_then: HashSet<String> = fvs_then
                 .difference(&fvs_else)
-                .filter(|v| owned.contains(*v))
+                .filter(|v| branch_owned.contains(*v))
                 .cloned()
                 .collect();
             let only_else: HashSet<String> = fvs_else
                 .difference(&fvs_then)
-                .filter(|v| owned.contains(*v))
+                .filter(|v| branch_owned.contains(*v))
                 .cloned()
                 .collect();
 
             let rc_cond = xform(cond, owned);
 
-            let mut rc_then = xform(then_, owned);
-            let mut rc_else = xform(else_, owned);
+            let mut rc_then = xform(then_, &branch_owned);
+            let mut rc_else = xform(else_, &branch_owned);
 
             for var in &only_else {
                 rc_then = RcExpr::drop_(var, rc_then);
@@ -161,11 +175,22 @@ fn xform(expr: &Expr, owned: &HashSet<String>) -> RcExpr {
                 rc_else = RcExpr::drop_(var, rc_else);
             }
 
-            RcExpr::If {
+            let mut result = RcExpr::If {
                 cond: Box::new(rc_cond),
                 then_: Box::new(rc_then),
                 else_: Box::new(rc_else),
+            };
+
+            // Dup vars consumed by cond that are also needed by a branch
+            let mut vars: Vec<&String> = owned.iter().collect();
+            vars.sort();
+            for var in vars {
+                if fvs_cond.contains(var) && (fvs_then.contains(var) || fvs_else.contains(var)) {
+                    result = RcExpr::dup(var, result);
+                }
             }
+
+            result
         }
 
         // ── Match ───────────────────────────────────────────────────────────

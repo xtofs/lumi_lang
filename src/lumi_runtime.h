@@ -230,6 +230,31 @@ static inline Value *int_add(Value *a, Value *b)
     return lumi_int(result);
 }
 
+static inline Value *int_sub(Value *a, Value *b)
+{
+    int64_t result = *(int64_t *)a->payload - *(int64_t *)b->payload;
+    rc_dec(a); rc_dec(b);
+    return lumi_int(result);
+}
+
+static inline Value *int_eq(Value *a, Value *b)
+{
+    int result = *(int64_t *)a->payload == *(int64_t *)b->payload;
+    rc_dec(a); rc_dec(b);
+    return lumi_bool(result);
+}
+
+/* Immortal integer singletons — initialised by lumi_runtime_init() */
+static Value *LUMI_INT0;
+static Value *LUMI_INT1;
+static inline Value *lumi_int0(void) { return LUMI_INT0; }
+static inline Value *lumi_int1(void) { return LUMI_INT1; }
+static inline void lumi_runtime_init(void)
+{
+    LUMI_INT0 = lumi_global(lumi_int(0));
+    LUMI_INT1 = lumi_global(lumi_int(1));
+}
+
 noreturn static void lumi_panic(const char *msg)
 {
     fprintf(stderr, "lumi panic: %s\n", msg);

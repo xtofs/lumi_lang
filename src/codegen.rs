@@ -44,6 +44,7 @@ pub fn emit_c_file(functions: &[(String, RcExpr)], entry: Option<&str>) -> Strin
         let mut fw = FnWriter::new(0);
         fw.line("int main(void) {");
         fw.indent += 1;
+        fw.line("lumi_runtime_init();");
         for (name, _) in functions {
             if name != entry_name {
                 fw.line(&format!("{name} = lumi_global(lumi_{name}());"));
