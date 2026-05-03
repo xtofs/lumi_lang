@@ -68,7 +68,7 @@ fn main() {
         ),
     );
 
-    let n = 26; // 26 has a runtime of about 10 seconds
+    let n = 24; // 24 has a runtime of about 2.5 seconds. 26 about 1 seconds
     let title = format!("sum_tree(tree({n})) = ");
     let main = Expr::let_(
         "_l",

@@ -16,11 +16,15 @@ use std::collections::HashSet;
 
 use crate::ast::{Expr, Pattern};
 use crate::liveness::{free_vars, free_vars_arm, pat_bindings_ordered, use_count};
-use crate::rc_ast::{RcExpr, RcMatchArm};
+
+// use crate::rc_ast as rc
+mod rc {
+    pub use crate::rc_ast::{Expr, MatchArm};
+}
 
 /// Transform every function through Perceus RC-insertion + simplification.
-/// Returns owned `(name, RcExpr)` pairs ready for codegen.
-pub fn compile_fns(functions: &[(&str, Expr)]) -> Vec<(String, RcExpr)> {
+/// Returns owned `(name, rc::Expr)` pairs ready for codegen.
+pub fn compile_fns(functions: &[(&str, Expr)]) -> Vec<(String, rc::Expr)> {
     functions
         .iter()
         .map(|(name, expr)| {
@@ -31,19 +35,19 @@ pub fn compile_fns(functions: &[(&str, Expr)]) -> Vec<(String, RcExpr)> {
 }
 
 /// Entry point: transform a top-level expression.
-pub fn transform(expr: &Expr) -> RcExpr {
+pub fn transform(expr: &Expr) -> rc::Expr {
     // No variables are owned at the top level.
     xform(expr, &HashSet::new())
 }
 
 // ── Core recursive transform ─────────────────────────────────────────────────
 
-fn xform(expr: &Expr, owned: &HashSet<String>) -> RcExpr {
+fn xform(expr: &Expr, owned: &HashSet<String>) -> rc::Expr {
     match expr {
         // ── Literals and variables are trivially owned ──────────────────────
-        Expr::Lit(l) => RcExpr::Lit(l.clone()),
+        Expr::Lit(l) => rc::Expr::Lit(l.clone()),
 
-        Expr::Var(x) => RcExpr::Var(x.clone()),
+        Expr::Var(x) => rc::Expr::Var(x.clone()),
 
         // ── Let ──────────────────────────────────────────────────────────────
         // The bound name is owned in the body.
@@ -57,12 +61,12 @@ fn xform(expr: &Expr, owned: &HashSet<String>) -> RcExpr {
             let rc_body = xform(body, &body_owned);
 
             let rc_body = if use_count(name, body) == 0 {
-                RcExpr::drop_(name, rc_body)
+                rc::Expr::drop_(name, rc_body)
             } else {
                 rc_body
             };
 
-            RcExpr::Let {
+            rc::Expr::Let {
                 name: name.clone(),
                 value: Box::new(rc_value),
                 body: Box::new(rc_body),
@@ -85,7 +89,7 @@ fn xform(expr: &Expr, owned: &HashSet<String>) -> RcExpr {
             let rc_body = xform(body, &body_owned);
 
             let rc_body = if use_count(param, body) == 0 {
-                RcExpr::drop_(param, rc_body)
+                rc::Expr::drop_(param, rc_body)
             } else {
                 rc_body
             };
@@ -96,7 +100,7 @@ fn xform(expr: &Expr, owned: &HashSet<String>) -> RcExpr {
                 .collect();
             captures.sort();
 
-            RcExpr::Lam {
+            rc::Expr::Lam {
                 param: param.clone(),
                 captures,
                 body: Box::new(rc_body),
@@ -117,11 +121,11 @@ fn xform(expr: &Expr, owned: &HashSet<String>) -> RcExpr {
             let rc_f = xform(f, owned);
             let rc_arg = xform(arg, owned);
 
-            let mut result = RcExpr::App(Box::new(rc_f), Box::new(rc_arg));
+            let mut result = rc::Expr::App(Box::new(rc_f), Box::new(rc_arg));
 
             for var in &shared {
                 if owned.contains(*var) {
-                    result = RcExpr::dup(var, result);
+                    result = rc::Expr::dup(var, result);
                 }
             }
 
@@ -167,13 +171,13 @@ fn xform(expr: &Expr, owned: &HashSet<String>) -> RcExpr {
             let mut rc_else = xform(else_, &branch_owned);
 
             for var in &only_else {
-                rc_then = RcExpr::drop_(var, rc_then);
+                rc_then = rc::Expr::drop_(var, rc_then);
             }
             for var in &only_then {
-                rc_else = RcExpr::drop_(var, rc_else);
+                rc_else = rc::Expr::drop_(var, rc_else);
             }
 
-            let mut result = RcExpr::If {
+            let mut result = rc::Expr::If {
                 cond: Box::new(rc_cond),
                 then_: Box::new(rc_then),
                 else_: Box::new(rc_else),
@@ -184,7 +188,7 @@ fn xform(expr: &Expr, owned: &HashSet<String>) -> RcExpr {
             vars.sort();
             for var in vars {
                 if fvs_cond.contains(var) && (fvs_then.contains(var) || fvs_else.contains(var)) {
-                    result = RcExpr::dup(var, result);
+                    result = rc::Expr::dup(var, result);
                 }
             }
 
@@ -204,7 +208,7 @@ fn xform(expr: &Expr, owned: &HashSet<String>) -> RcExpr {
                     let mut tmp_owned = owned.clone();
                     tmp_owned.insert(tmp.clone());
                     let rc_match = xform_match(&tmp, arms, &tmp_owned);
-                    RcExpr::Let {
+                    rc::Expr::Let {
                         name: tmp,
                         value: Box::new(rc_scrut),
                         body: Box::new(rc_match),
@@ -223,7 +227,7 @@ fn xform(expr: &Expr, owned: &HashSet<String>) -> RcExpr {
             let field_fvs: Vec<HashSet<String>> = fields.iter().map(|f| free_vars(f)).collect();
 
             let rc_fields = fields.iter().map(|f| xform(f, owned)).collect();
-            let mut result = RcExpr::Con {
+            let mut result = rc::Expr::Con {
                 tag: tag.clone(),
                 fields: rc_fields,
                 reuse: None,
@@ -235,7 +239,7 @@ fn xform(expr: &Expr, owned: &HashSet<String>) -> RcExpr {
             for var in vars {
                 let uses = field_fvs.iter().filter(|fvs| fvs.contains(var)).count();
                 for _ in 1..uses {
-                    result = RcExpr::dup(var, result);
+                    result = rc::Expr::dup(var, result);
                 }
             }
             result
@@ -247,7 +251,7 @@ fn xform(expr: &Expr, owned: &HashSet<String>) -> RcExpr {
         Expr::Foreign { name, args } => {
             let arg_fvs: Vec<HashSet<String>> = args.iter().map(free_vars).collect();
             let rc_args = args.iter().map(|a| xform(a, owned)).collect();
-            let mut result = RcExpr::Foreign {
+            let mut result = rc::Expr::Foreign {
                 name: name.clone(),
                 args: rc_args,
             };
@@ -257,7 +261,7 @@ fn xform(expr: &Expr, owned: &HashSet<String>) -> RcExpr {
             for var in vars {
                 let uses = arg_fvs.iter().filter(|fvs| fvs.contains(var)).count();
                 for _ in 1..uses {
-                    result = RcExpr::dup(var, result);
+                    result = rc::Expr::dup(var, result);
                 }
             }
             result
@@ -267,13 +271,17 @@ fn xform(expr: &Expr, owned: &HashSet<String>) -> RcExpr {
 
 // ── Match helper ─────────────────────────────────────────────────────────────
 
-fn xform_match(scrutinee: &str, arms: &[crate::ast::MatchArm], owned: &HashSet<String>) -> RcExpr {
+fn xform_match(
+    scrutinee: &str,
+    arms: &[crate::ast::MatchArm],
+    owned: &HashSet<String>,
+) -> rc::Expr {
     // Collect free variables per arm (excluding the arm's own bindings).
     let arm_fvs: Vec<HashSet<String>> = arms.iter().map(|a| free_vars_arm(a)).collect();
 
     // Only one arm fires, so there is no Dup for "variables used in other arms".
     // Each arm either uses an owned variable (consumes it) or drops it.
-    let rc_arms: Vec<RcMatchArm> = arms
+    let rc_arms: Vec<rc::MatchArm> = arms
         .iter()
         .enumerate()
         .map(|(i, arm)| {
@@ -296,13 +304,13 @@ fn xform_match(scrutinee: &str, arms: &[crate::ast::MatchArm], owned: &HashSet<S
                     continue;
                 }
                 if !this_fvs.contains(var) {
-                    rc_body = RcExpr::drop_(var, rc_body);
+                    rc_body = rc::Expr::drop_(var, rc_body);
                 }
             }
 
             let tag = arm_tag(&arm.pat);
 
-            RcMatchArm {
+            rc::MatchArm {
                 tag,
                 bindings,
                 reuse_token,
@@ -311,7 +319,7 @@ fn xform_match(scrutinee: &str, arms: &[crate::ast::MatchArm], owned: &HashSet<S
         })
         .collect();
 
-    RcExpr::Match {
+    rc::Expr::Match {
         scrutinee: scrutinee.to_string(),
         arms: rc_arms,
     }
@@ -322,13 +330,17 @@ fn xform_match(scrutinee: &str, arms: &[crate::ast::MatchArm], owned: &HashSet<S
 ///
 /// This is the heart of Perceus: the compiler threads the reuse token from
 /// the match arm directly into the constructor call, eliminating malloc.
-fn xform_with_reuse(expr: &Expr, owned: &HashSet<String>, reuse_token: &Option<String>) -> RcExpr {
+fn xform_with_reuse(
+    expr: &Expr,
+    owned: &HashSet<String>,
+    reuse_token: &Option<String>,
+) -> rc::Expr {
     match expr {
         Expr::Con { tag, fields } => {
             let field_fvs: Vec<HashSet<String>> = fields.iter().map(|f| free_vars(f)).collect();
 
             let rc_fields = fields.iter().map(|f| xform(f, owned)).collect();
-            let mut result = RcExpr::Con {
+            let mut result = rc::Expr::Con {
                 tag: tag.clone(),
                 fields: rc_fields,
                 reuse: reuse_token.clone(),
@@ -339,7 +351,7 @@ fn xform_with_reuse(expr: &Expr, owned: &HashSet<String>, reuse_token: &Option<S
             for var in vars {
                 let uses = field_fvs.iter().filter(|fvs| fvs.contains(var)).count();
                 for _ in 1..uses {
-                    result = RcExpr::dup(var, result);
+                    result = rc::Expr::dup(var, result);
                 }
             }
             result

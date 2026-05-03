@@ -11,15 +11,15 @@ use crate::ast::Lit;
 pub type ReuseToken = String;
 
 #[derive(Debug, Clone)]
-pub enum RcExpr {
+pub enum Expr {
     Lit(Lit),
 
     Var(String),
 
     Let {
         name: String,
-        value: Box<RcExpr>,
-        body: Box<RcExpr>,
+        value: Box<Expr>,
+        body: Box<Expr>,
     },
 
     Lam {
@@ -27,36 +27,36 @@ pub enum RcExpr {
         /// Variables captured from the enclosing scope.
         /// Each one has already been Dup'd at the closure-creation site.
         captures: Vec<String>,
-        body: Box<RcExpr>,
+        body: Box<Expr>,
     },
 
-    App(Box<RcExpr>, Box<RcExpr>),
+    App(Box<Expr>, Box<Expr>),
 
     If {
-        cond: Box<RcExpr>,
-        then_: Box<RcExpr>,
-        else_: Box<RcExpr>,
+        cond: Box<Expr>,
+        then_: Box<Expr>,
+        else_: Box<Expr>,
     },
 
     /// rc_inc(var); evaluate body.
     /// Inserted when a variable is shared across multiple uses.
     Dup {
         var: String,
-        body: Box<RcExpr>,
+        body: Box<Expr>,
     },
 
     /// rc_dec(var); evaluate body.
     /// Inserted when a variable goes out of scope without being consumed.
     Drop {
         var: String,
-        body: Box<RcExpr>,
+        body: Box<Expr>,
     },
 
     /// Pattern match. The scrutinee is *consumed* (ownership transferred in).
     /// Each arm may carry a ReuseToken for the scrutinee's freed allocation.
     Match {
         scrutinee: String,
-        arms: Vec<RcMatchArm>,
+        arms: Vec<MatchArm>,
     },
 
     /// Constructor call.
@@ -64,44 +64,44 @@ pub enum RcExpr {
     /// instead of calling malloc — the core Perceus optimisation.
     Con {
         tag: String,
-        fields: Vec<RcExpr>,
+        fields: Vec<Expr>,
         reuse: Option<ReuseToken>,
     },
 
     /// Direct call to a named C function — escape hatch for I/O / arithmetic.
     Foreign {
         name: String,
-        args: Vec<RcExpr>,
+        args: Vec<Expr>,
     },
 }
 
 #[derive(Debug, Clone)]
-pub struct RcMatchArm {
+pub struct MatchArm {
     /// The constructor tag this arm matches (or "_" for wildcard).
     pub tag: String,
     /// Field variables extracted from the matched constructor.
     pub bindings: Vec<String>,
     /// Reuse token for the scrutinee's allocation, usable by a Con in this arm.
     pub reuse_token: Option<ReuseToken>,
-    pub body: RcExpr,
+    pub body: Expr,
 }
 
 // ── Builder helpers ───────────────────────────────────────────────────────────
 
-impl RcExpr {
+impl Expr {
     pub fn var(name: &str) -> Self {
-        RcExpr::Var(name.to_string())
+        Expr::Var(name.to_string())
     }
 
-    pub fn dup(var: &str, body: RcExpr) -> Self {
-        RcExpr::Dup {
+    pub fn dup(var: &str, body: Expr) -> Self {
+        Expr::Dup {
             var: var.to_string(),
             body: Box::new(body),
         }
     }
 
-    pub fn drop_(var: &str, body: RcExpr) -> Self {
-        RcExpr::Drop {
+    pub fn drop_(var: &str, body: Expr) -> Self {
+        Expr::Drop {
             var: var.to_string(),
             body: Box::new(body),
         }
@@ -117,28 +117,28 @@ impl RcExpr {
         let i1 = "  ".repeat(indent + 1);
         let i2 = "  ".repeat(indent + 2);
         match self {
-            RcExpr::Lit(lit) => match lit {
+            Expr::Lit(lit) => match lit {
                 Lit::Int(n) => write!(w, "{n}"),
                 Lit::Bool(b) => write!(w, "{b}"),
                 Lit::Unit => write!(w, "()"),
                 Lit::Str(s) => write!(w, "\"{s}\""),
             },
-            RcExpr::Var(name) => write!(w, "{name}"),
-            RcExpr::Dup { var, body } => {
+            Expr::Var(name) => write!(w, "{name}"),
+            Expr::Dup { var, body } => {
                 write!(w, "dup({var}); ")?;
                 body.pp_with_indent(w, indent)
             }
-            RcExpr::Drop { var, body } => {
+            Expr::Drop { var, body } => {
                 write!(w, "drop({var}); ")?;
                 body.pp_with_indent(w, indent)
             }
-            RcExpr::Let { name, value, body } => {
+            Expr::Let { name, value, body } => {
                 write!(w, "let {name} =\n{i1}")?;
                 value.pp_with_indent(w, indent + 1)?;
                 write!(w, "\n{i0}in\n{i1}")?;
                 body.pp_with_indent(w, indent + 1)
             }
-            RcExpr::Lam {
+            Expr::Lam {
                 param,
                 captures,
                 body,
@@ -151,14 +151,14 @@ impl RcExpr {
                 write!(w, "λ{caps}{param} =>\n{i1}")?;
                 body.pp_with_indent(w, indent + 1)
             }
-            RcExpr::App(f, arg) => {
+            Expr::App(f, arg) => {
                 write!(w, "(")?;
                 f.pp_with_indent(w, indent)?;
                 write!(w, " ")?;
                 arg.pp_with_indent(w, indent)?;
                 write!(w, ")")
             }
-            RcExpr::If { cond, then_, else_ } => {
+            Expr::If { cond, then_, else_ } => {
                 write!(w, "if ")?;
                 cond.pp_with_indent(w, indent)?;
                 write!(w, "\n{i0}then ")?;
@@ -166,7 +166,7 @@ impl RcExpr {
                 write!(w, "\n{i0}else ")?;
                 else_.pp_with_indent(w, indent)
             }
-            RcExpr::Match { scrutinee, arms } => {
+            Expr::Match { scrutinee, arms } => {
                 write!(w, "match {scrutinee}")?;
                 for arm in arms {
                     let bindings = arm.bindings.join(", ");
@@ -180,7 +180,7 @@ impl RcExpr {
                 }
                 Ok(())
             }
-            RcExpr::Con { tag, fields, reuse } => {
+            Expr::Con { tag, fields, reuse } => {
                 let reuse = reuse
                     .as_deref()
                     .map(|t| format!(" [reuse: {t}]"))
@@ -194,7 +194,7 @@ impl RcExpr {
                 }
                 write!(w, "){reuse}")
             }
-            RcExpr::Foreign { name, args } => {
+            Expr::Foreign { name, args } => {
                 write!(w, "{name}(")?;
                 for (i, a) in args.iter().enumerate() {
                     if i > 0 {

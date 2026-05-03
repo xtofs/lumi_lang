@@ -12,12 +12,16 @@
 /// On entry, the closure body extracts each captured variable from `_env`,
 /// increments its RC, then decrements `_env` (which may free the closure).
 use crate::ast::Lit;
-use crate::rc_ast::{RcExpr, RcMatchArm};
+use crate::rc_ast::MatchArm;
+// use crate::rc_ast as rc
+mod rc {
+    pub use crate::rc_ast::Expr;
+}
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /// Full output: runtime header + lifted closures + entry-point functions.
-pub fn emit_program(functions: &[(String, RcExpr)]) -> String {
+pub fn emit_program(functions: &[(String, rc::Expr)]) -> String {
     let mut cg = Codegen::new();
     cg.lifted.push_str(C_RUNTIME);
     let bodies = emit_bodies(&mut cg, functions);
@@ -28,7 +32,7 @@ pub fn emit_program(functions: &[(String, RcExpr)]) -> String {
 /// every non-entry function (immortal, to support cross-references and recursion)
 /// + lifted closures + entry-point functions + `int main(void)` that initialises
 /// each non-entry function as an immortal global, calls the entry, then cleans up.
-pub fn emit_c_file(functions: &[(String, RcExpr)], entry: Option<&str>) -> String {
+pub fn emit_c_file(functions: &[(String, rc::Expr)], entry: Option<&str>) -> String {
     let mut cg = Codegen::new();
     cg.lifted.push_str("#include \"lumi_runtime.h\"\n\n");
     for (name, _) in functions {
@@ -70,13 +74,13 @@ pub fn emit_c_file(functions: &[(String, RcExpr)], entry: Option<&str>) -> Strin
 
 /// Only the generated portion (lifted closures + entry-point functions),
 /// without the runtime header.  Useful for display / diffing.
-pub fn emit_body_only(functions: &[(String, RcExpr)]) -> String {
+pub fn emit_body_only(functions: &[(String, rc::Expr)]) -> String {
     let mut cg = Codegen::new();
     let bodies = emit_bodies(&mut cg, functions);
     cg.lifted + &bodies
 }
 
-fn emit_bodies(cg: &mut Codegen, functions: &[(String, RcExpr)]) -> String {
+fn emit_bodies(cg: &mut Codegen, functions: &[(String, rc::Expr)]) -> String {
     let mut bodies = String::new();
     for (name, expr) in functions {
         bodies.push_str(&cg.emit_function(name, expr));
@@ -87,7 +91,7 @@ fn emit_bodies(cg: &mut Codegen, functions: &[(String, RcExpr)]) -> String {
 
 // ── Codegen state ─────────────────────────────────────────────────────────────
 
-fn rc_comment(label: &str, expr: &RcExpr) -> String {
+fn rc_comment(label: &str, expr: &rc::Expr) -> String {
     let mut buf = Vec::new();
     let _ = expr.pp(&mut buf);
     let text = String::from_utf8_lossy(&buf);
@@ -122,7 +126,7 @@ impl Codegen {
 
     // ── Top-level function ────────────────────────────────────────────────────
 
-    fn emit_function(&mut self, name: &str, expr: &RcExpr) -> String {
+    fn emit_function(&mut self, name: &str, expr: &rc::Expr) -> String {
         let mut fw = FnWriter::new(0);
         fw.line(&rc_comment(&format!("Lumi {name}"), expr));
         fw.line(&format!("Value* lumi_{name}(void) {{"));
@@ -137,13 +141,13 @@ impl Codegen {
     // ── Expression emitter ────────────────────────────────────────────────────
     // Writes statements into `fw`, returns the C rvalue holding the result.
 
-    fn emit_expr(&mut self, expr: &RcExpr, fw: &mut FnWriter) -> String {
+    fn emit_expr(&mut self, expr: &rc::Expr, fw: &mut FnWriter) -> String {
         match expr {
             // ── Literals ─────────────────────────────────────────────────────
-            RcExpr::Lit(Lit::Int(n)) => format!("lumi_int({n})"),
-            RcExpr::Lit(Lit::Bool(b)) => format!("lumi_bool({})", *b as i32),
-            RcExpr::Lit(Lit::Unit) => "lumi_unit()".to_string(),
-            RcExpr::Lit(Lit::Str(s)) => {
+            rc::Expr::Lit(Lit::Int(n)) => format!("lumi_int({n})"),
+            rc::Expr::Lit(Lit::Bool(b)) => format!("lumi_bool({})", *b as i32),
+            rc::Expr::Lit(Lit::Unit) => "lumi_unit()".to_string(),
+            rc::Expr::Lit(Lit::Str(s)) => {
                 let t = fw.tmp();
                 fw.line(&format!(
                     "Value* {t} = lumi_str(\"{}\");",
@@ -153,22 +157,22 @@ impl Codegen {
             }
 
             // ── Variable ─────────────────────────────────────────────────────
-            RcExpr::Var(x) => x.clone(),
+            rc::Expr::Var(x) => x.clone(),
 
             // ── Dup: rc_inc then continue ─────────────────────────────────────
-            RcExpr::Dup { var, body } => {
+            rc::Expr::Dup { var, body } => {
                 fw.line(&format!("rc_inc({var});  /* dup {var} */"));
                 self.emit_expr(body, fw)
             }
 
             // ── Drop: rc_dec then continue ────────────────────────────────────
-            RcExpr::Drop { var, body } => {
+            rc::Expr::Drop { var, body } => {
                 fw.line(&format!("rc_dec({var});  /* drop {var} */"));
                 self.emit_expr(body, fw)
             }
 
             // ── Let ──────────────────────────────────────────────────────────
-            RcExpr::Let { name, value, body } => {
+            rc::Expr::Let { name, value, body } => {
                 let val = self.emit_expr(value, fw);
                 fw.line(&format!("Value* {name} = {val};"));
                 self.emit_expr(body, fw)
@@ -176,7 +180,7 @@ impl Codegen {
 
             // ── Lambda ────────────────────────────────────────────────────────
             // Lift the body to a static C function; emit a closure allocation.
-            RcExpr::Lam {
+            rc::Expr::Lam {
                 param,
                 captures,
                 body,
@@ -197,7 +201,7 @@ impl Codegen {
 
             // ── Application ──────────────────────────────────────────────────
             // apply() transfers ownership of both f and arg to the callee.
-            RcExpr::App(f, arg) => {
+            rc::Expr::App(f, arg) => {
                 let fv = self.emit_expr(f, fw);
                 let av = self.emit_expr(arg, fw);
                 let t = fw.tmp();
@@ -208,7 +212,7 @@ impl Codegen {
             // ── If ───────────────────────────────────────────────────────────
             // The condition is consumed after testing: we evaluate it into a
             // temp, test it, then rc_dec it before entering either branch.
-            RcExpr::If { cond, then_, else_ } => {
+            rc::Expr::If { cond, then_, else_ } => {
                 let cv = self.emit_expr(cond, fw);
                 let flag = fw.tmp();
                 let result = fw.tmp();
@@ -231,7 +235,7 @@ impl Codegen {
             }
 
             // ── Match ────────────────────────────────────────────────────────
-            RcExpr::Match { scrutinee, arms } => {
+            rc::Expr::Match { scrutinee, arms } => {
                 let result = fw.tmp();
                 fw.line(&format!("Value* {result};"));
                 fw.line(&format!("switch (tag_of({scrutinee})) {{"));
@@ -246,7 +250,7 @@ impl Codegen {
             }
 
             // ── Constructor ──────────────────────────────────────────────────
-            RcExpr::Con { tag, fields, reuse } => {
+            rc::Expr::Con { tag, fields, reuse } => {
                 let field_temps: Vec<String> =
                     fields.iter().map(|f| self.emit_expr(f, fw)).collect();
                 let t = fw.tmp();
@@ -267,7 +271,7 @@ impl Codegen {
             }
 
             // ── Foreign call ─────────────────────────────────────────────────
-            RcExpr::Foreign { name, args } => {
+            rc::Expr::Foreign { name, args } => {
                 let arg_vals: Vec<String> = args.iter().map(|a| self.emit_expr(a, fw)).collect();
                 let t = fw.tmp();
                 fw.line(&format!("Value* {t} = {name}({});", arg_vals.join(", ")));
@@ -278,7 +282,7 @@ impl Codegen {
 
     // ── Lambda lifting ────────────────────────────────────────────────────────
 
-    fn lift_lambda(&mut self, fn_name: &str, param: &str, captures: &[String], body: &RcExpr) {
+    fn lift_lambda(&mut self, fn_name: &str, param: &str, captures: &[String], body: &rc::Expr) {
         // Forward declaration (allows mutual recursion among closures).
         self.lifted.push_str(&format!(
             "static Value* {fn_name}(Value* _env, Value* _arg);\n\n"
@@ -321,7 +325,7 @@ impl Codegen {
 
     // ── Match arm ─────────────────────────────────────────────────────────────
 
-    fn emit_arm(&mut self, scrutinee: &str, arm: &RcMatchArm, result: &str, fw: &mut FnWriter) {
+    fn emit_arm(&mut self, scrutinee: &str, arm: &MatchArm, result: &str, fw: &mut FnWriter) {
         let tag_upper = arm.tag.to_uppercase();
         if arm.tag == "_" {
             fw.line("default: {");
