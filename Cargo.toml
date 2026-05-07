@@ -2,3 +2,8 @@
 name = "lumi"
 version = "0.1.0"
 edition = "2021"
+
+
+[dependencies]
+chumsky = "0.13.0"
+logos = "0.16.1"

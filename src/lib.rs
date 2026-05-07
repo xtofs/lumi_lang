@@ -1,6 +1,7 @@
 pub mod ast;
 pub mod codegen;
 pub mod liveness;
+pub mod parser;
 pub mod perceus;
 pub mod rc;
 pub mod simplify;
