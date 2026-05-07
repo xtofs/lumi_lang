@@ -143,8 +143,32 @@ impl Expr {
             Expr::Let { name, value, body } => {
                 write!(w, "let {name} =\n{i1}")?;
                 value.pp_with_indent(w, indent + 1)?;
-                write!(w, "\n{i0}in\n{i1}")?;
-                body.pp_with_indent(w, indent + 1)?;
+                write!(w, "\n{i0}")?;
+
+                // Flatten nested lets for a more compact rendering:
+                // let a = ...
+                // let b = ...
+                // in ...
+                let mut current = body.as_ref();
+                loop {
+                    match current {
+                        Expr::Let {
+                            name: n,
+                            value: v,
+                            body: b,
+                        } => {
+                            write!(w, "let {n} =\n{i1}")?;
+                            v.pp_with_indent(w, indent + 1)?;
+                            write!(w, "\n{i0}")?;
+                            current = b.as_ref();
+                        }
+                        _ => {
+                            write!(w, "in\n{i1}")?;
+                            current.pp_with_indent(w, indent + 1)?;
+                            break;
+                        }
+                    }
+                }
             }
             Expr::Lam {
                 param,
