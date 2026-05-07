@@ -94,7 +94,7 @@ fn emit_bodies(cg: &mut Codegen, functions: &[(String, rc::Expr)]) -> String {
 fn rc_comment(label: &str, expr: &rc::Expr) -> String {
     let mut buf = Vec::new();
     // using single line print for comment
-    let _ = expr.print(&mut buf);
+    let _ = expr.pretty_print(&mut buf);
     let text = String::from_utf8_lossy(&buf);
     let mut out = format!("/* {label}:\n");
     for line in text.lines() {

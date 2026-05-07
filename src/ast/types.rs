@@ -43,7 +43,7 @@ pub enum Expr {
         scrutinee: Box<Expr>,
         arms: Vec<MatchArm>,
     },
-    /// Algebraic data type constructor: Tag(field0, field1, ...)
+    /// Product type constructor: Tag(field0, field1, ...)
     Con {
         tag: String,
         fields: Vec<Expr>,
@@ -114,7 +114,6 @@ impl Expr {
             args,
         }
     }
-
 }
 
 impl Pattern {

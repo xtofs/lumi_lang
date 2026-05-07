@@ -4,11 +4,16 @@ use crate::ast::Lit;
 
 impl Expr {
     pub fn print(&self, w: &mut dyn std::io::Write) -> std::io::Result<()> {
-        // Inline the logic of pp_inner for single line output
-        let needs_parens = false && matches!(self, Expr::Lam { .. } | Expr::App(_, _));
+        self.pp_inner(w, false)?;
+        writeln!(w)
+    }
+
+    fn pp_inner(&self, w: &mut dyn std::io::Write, parens: bool) -> std::io::Result<()> {
+        let needs_parens = parens && matches!(self, Expr::Lam { .. } | Expr::App(_, _));
         if needs_parens {
             write!(w, "(")?;
         }
+
         match self {
             Expr::Lit(lit) => match lit {
                 Lit::Int(n) => write!(w, "{}", n)?,
@@ -19,20 +24,17 @@ impl Expr {
             Expr::Var(name) => write!(w, "{}", name)?,
             Expr::Dup { var, body } => {
                 write!(w, "dup({var}); ")?;
-                body.print(w)?;
-                ()
+                body.pp_inner(w, false)?;
             }
             Expr::Drop { var, body } => {
                 write!(w, "drop({var}); ")?;
-                body.print(w)?;
-                ()
+                body.pp_inner(w, false)?;
             }
             Expr::Let { name, value, body } => {
                 write!(w, "let {} = ", name)?;
-                value.print(w)?;
+                value.pp_inner(w, false)?;
                 write!(w, " in ")?;
-                body.print(w)?;
-                ()
+                body.pp_inner(w, false)?;
             }
             Expr::Lam {
                 param,
@@ -45,23 +47,20 @@ impl Expr {
                     format!("[{}] ", captures.join(", "))
                 };
                 write!(w, "λ{caps}{param} => ")?;
-                body.print(w)?;
-                ()
+                body.pp_inner(w, false)?;
             }
             Expr::App(f, arg) => {
-                f.print(w)?;
+                f.pp_inner(w, true)?;
                 write!(w, " ")?;
-                arg.print(w)?;
-                ()
+                arg.pp_inner(w, true)?;
             }
             Expr::If { cond, then_, else_ } => {
                 write!(w, "if ")?;
-                cond.print(w)?;
+                cond.pp_inner(w, false)?;
                 write!(w, " then ")?;
-                then_.print(w)?;
+                then_.pp_inner(w, false)?;
                 write!(w, " else ")?;
-                else_.print(w)?;
-                ()
+                else_.pp_inner(w, false)?;
             }
             Expr::Match { scrutinee, arms } => {
                 write!(w, "match {scrutinee} with ")?;
@@ -76,9 +75,8 @@ impl Expr {
                         .map(|t| format!(" [reuse: {t}]"))
                         .unwrap_or_default();
                     write!(w, "{}({}){} => ", arm.tag, bindings, reuse)?;
-                    arm.body.print(w)?;
+                    arm.body.pp_inner(w, false)?;
                 }
-                ()
             }
             Expr::Con { tag, fields, reuse } => {
                 let reuse = reuse
@@ -90,10 +88,9 @@ impl Expr {
                     if i > 0 {
                         write!(w, ", ")?;
                     }
-                    f.print(w)?;
+                    f.pp_inner(w, false)?;
                 }
                 write!(w, "){reuse}")?;
-                ()
             }
             Expr::Foreign { name, args } => {
                 write!(w, "{name}(")?;
@@ -101,13 +98,17 @@ impl Expr {
                     if i > 0 {
                         write!(w, ", ")?;
                     }
-                    a.print(w)?;
+                    a.pp_inner(w, false)?;
                 }
                 write!(w, ")")?;
-                ()
             }
         }
-        writeln!(w)
+
+        if needs_parens {
+            write!(w, ")")?;
+        }
+
+        Ok(())
     }
 
     pub fn pretty_print(&self, w: &mut dyn std::io::Write) -> std::io::Result<()> {
