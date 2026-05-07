@@ -9,7 +9,8 @@
 //! When `xs` is uniquely owned (RC == 1), each Cons cell is recycled in-place
 //! by the ReuseToken mechanism — no malloc per element.
 
-use lumi::{emit_sample, expr_list, Expr, MatchArm, Pattern};
+use lumi::{compile_program, expr_list, Expr, MatchArm, Pattern};
+use std::process::Command;
 
 fn main() {
     let inc_list_fn = Expr::lam(
@@ -47,11 +48,19 @@ fn main() {
                 Expr::let_(
                     "_p",
                     Expr::foreign("print", vec![Expr::var("_out")]),
-                    Expr::foreign("print_nl", vec![]),
+                    Expr::foreign("println", vec![]),
                 ),
             ),
         ),
     );
 
-    emit_sample("inc_list", &[("inc_list", inc_list_fn), ("main", main)], "main");
+    compile_program(
+        "out",
+        "inc_list",
+        &[("inc_list", inc_list_fn), ("main", main)],
+        "main",
+    );
+    Command::new("./out/inc_list")
+        .status()
+        .expect("failed to run inc_list");
 }

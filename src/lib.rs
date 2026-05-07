@@ -10,6 +10,7 @@ pub use ast::{Expr, MatchArm, Pattern};
 
 use std::fs;
 use std::io::{BufWriter, Write};
+use std::process::Command;
 
 // ── Shared expression builders ────────────────────────────────────────────────
 
@@ -25,20 +26,23 @@ pub fn expr_list(items: Vec<Expr>) -> Expr {
 // ── Pipeline entry point ──────────────────────────────────────────────────────
 
 /// Compile `functions` through the Perceus pipeline, then write:
-///   - `out/<name>.txt`  — debug dump (source AST, RC AST, generated C)
-///   - `out/<name>.c`    — compilable C translation unit
+///   - `<out_dir>/<name>.txt`  — debug dump (source AST, RC AST, generated C)
+///   - `<out_dir>/<name>.c`    — compilable C translation unit
 ///
 /// `entry` names the function emitted as `int main(void)`.
-pub fn emit_sample(name: &str, functions: &[(&str, Expr)], entry: &str) {
-    fs::create_dir_all("out").expect("cannot create out/");
-    fs::write("out/lumi_runtime.h", include_str!("lumi_runtime.h"))
-        .expect("cannot write lumi_runtime.h");
+pub fn emit_program(out_dir: &str, name: &str, functions: &[(&str, Expr)], entry: &str) {
+    fs::create_dir_all(out_dir).expect("cannot create output directory");
+    fs::write(
+        format!("{out_dir}/lumi_runtime.h"),
+        include_str!("lumi_runtime.h"),
+    )
+    .expect("cannot write lumi_runtime.h");
 
     let rc_fns = perceus::compile_fns(functions);
 
     // ── debug .txt ───────────────────────────────────────────────────────────
     {
-        let path = format!("out/{name}.txt");
+        let path = format!("{out_dir}/{name}.txt");
         let file = fs::File::create(&path).expect("cannot create output file");
         let mut w = BufWriter::new(file);
         write_banner(&mut w, name);
@@ -68,10 +72,28 @@ pub fn emit_sample(name: &str, functions: &[(&str, Expr)], entry: &str) {
     // ── .c file ──────────────────────────────────────────────────────────────
     {
         let program = codegen::emit_c_file(&rc_fns, Some(entry));
-        let path = format!("out/{name}.c");
+        let path = format!("{out_dir}/{name}.c");
         fs::write(&path, &program).expect("cannot write .c file");
         println!("wrote {path}");
     }
+}
+
+/// Compile `functions` through the Perceus pipeline, write the C files to
+/// `<out_dir>`, then invoke the C compiler to produce a native binary.
+///
+/// Equivalent to calling [`emit_program`] followed by:
+///   cc -std=c11 -o <out_dir>/<name> <out_dir>/<name>.c
+pub fn compile_program(out_dir: &str, name: &str, functions: &[(&str, Expr)], entry: &str) {
+    emit_program(out_dir, name, functions, entry);
+
+    let c_path = format!("{out_dir}/{name}.c");
+    let bin_path = format!("{out_dir}/{name}");
+
+    let status = Command::new("cc")
+        .args(["-std=c11", "-o", &bin_path, &c_path])
+        .status()
+        .unwrap_or_else(|e| panic!("failed to launch cc: {e}"));
+    assert!(status.success(), "cc exited with {status}");
 }
 
 fn write_banner(w: &mut dyn Write, name: &str) {

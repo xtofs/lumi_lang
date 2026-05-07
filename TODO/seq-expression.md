@@ -7,7 +7,7 @@ Driver functions like `and_driver` chain many effectful steps using nested
 Expr::let_("_sl0", print(...),
   Expr::let_("_r0", app(...),
     Expr::let_("_sv0", print(...),
-      Expr::let_("_sn0", print_nl(), ...))))
+      Expr::let_("_sn0", println(), ...))))
 ```
 
 ## Proposed addition
@@ -26,7 +26,7 @@ Usage:
 Expr::seq(vec![
     Expr::foreign("print", vec![Expr::str_("and True True = ")]),
     Expr::foreign("print", vec![Expr::app(...)]),
-    Expr::foreign("print_nl", vec![]),
+    Expr::foreign("println", vec![]),
 ])
 ```
 

@@ -1,3 +1,5 @@
+use chumsky::input::Input;
+
 /// C code generator.
 ///
 /// Emits a C translation unit with:
@@ -244,7 +246,14 @@ impl Codegen {
                 for arm in arms {
                     self.emit_arm(scrutinee, arm, &result.clone(), fw);
                 }
-                fw.line("default: lumi_panic(\"unmatched\"); break;");
+                let tags: Vec<String> = arms.iter().map(|a| a.tag.clone()).collect();
+                let msg = format!("unmatched. expected {}", tags.join("|"));
+                fw.line("default: {");
+                fw.indent += 1;
+                fw.line(&format!("lumi_panic(\"{msg}\");"));
+                fw.line(&format!("break;"));
+                fw.indent -= 1;
+                fw.line("}");
                 fw.indent -= 1;
                 fw.line("}");
                 result

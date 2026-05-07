@@ -295,12 +295,6 @@ noreturn static void lumi_panic(const char *msg)
  *  print() handles any Value* — tag determines the format.
  * ─────────────────────────────────────────────────────────── */
 
-static inline Value *print_nl(void)
-{
-    printf("\n");
-    return lumi_unit();
-}
-
 static Value *print(Value *v)
 {
     if (!v)
@@ -344,7 +338,8 @@ static Value *print(Value *v)
         int _first = 1;
         while (v && v->tag == TAG_CONS)
         {
-            if (!_first) printf(", ");
+            if (!_first)
+                printf(", ");
             _first = 0;
             Value *head = field(v, 0);
             rc_inc(head);
@@ -354,7 +349,8 @@ static Value *print(Value *v)
             print(head);
             v = tail;
         }
-        if (v) rc_dec(v);
+        if (v)
+            rc_dec(v);
         printf("]");
         break;
     }
@@ -378,6 +374,13 @@ static Value *print(Value *v)
         break;
     }
     return lumi_unit();
+}
+
+static inline Value *println(Value *v)
+{
+    Value *x = print(v);
+    printf("\n");
+    return x;
 }
 
 #endif /* LUMI_RUNTIME_H */

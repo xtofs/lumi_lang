@@ -10,7 +10,8 @@
 //! The lambda `λx. int_add(x, 1)` passed as `f` exercises closure capture:
 //! `lumi_int1` (an immortal singleton) is captured and referenced on every call.
 
-use lumi::{emit_sample, expr_list, Expr, MatchArm, Pattern};
+use lumi::{compile_program, expr_list, Expr, MatchArm, Pattern};
+use std::process::Command;
 
 fn main() {
     let map_fn = Expr::lam(
@@ -48,25 +49,29 @@ fn main() {
         ),
     );
 
+    let n = 10;
+    let lst: Vec<Expr> = (0..n).map(|i| Expr::int(i)).collect();
+
     let main = Expr::let_(
         "_inc",
         inc_fn,
         Expr::let_(
             "_inp",
-            expr_list(vec![Expr::int(0), Expr::int(1), Expr::int(2)]),
+            expr_list(lst),
             Expr::let_(
                 "_l",
-                Expr::foreign("print", vec![Expr::str_("map (+1) [0,1,2] = ")]),
+                Expr::foreign("println", vec![Expr::var("_inp")]),
+                // Expr::unit(),
                 Expr::let_(
-                    "_ms",
+                    "_map_inc",
                     Expr::app(Expr::var("map"), Expr::var("_inc")),
                     Expr::let_(
                         "_out",
-                        Expr::app(Expr::var("_ms"), Expr::var("_inp")),
+                        Expr::app(Expr::var("_map_inc"), Expr::var("_inp")),
                         Expr::let_(
                             "_p",
-                            Expr::foreign("print", vec![Expr::var("_out")]),
-                            Expr::foreign("print_nl", vec![]),
+                            Expr::foreign("println", vec![Expr::var("_out")]),
+                            Expr::foreign("println", vec![Expr::unit()]),
                         ),
                     ),
                 ),
@@ -74,5 +79,8 @@ fn main() {
         ),
     );
 
-    emit_sample("map", &[("map", map_fn), ("main", main)], "main");
+    compile_program("out", "map", &[("map", map_fn), ("main", main)], "main");
+    Command::new("./out/map")
+        .status()
+        .expect("failed to run map");
 }

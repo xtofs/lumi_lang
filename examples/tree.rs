@@ -15,7 +15,8 @@
 //! Perceus inserts Dup(n) before the If.
 //! LUMI_INT0 and LUMI_INT1 are immortal singletons (no malloc per call).
 
-use lumi::{emit_sample, Expr, MatchArm, Pattern};
+use lumi::{compile_program, Expr, MatchArm, Pattern};
+use std::process::Command;
 
 fn main() {
     let tree_fn = Expr::lam(
@@ -82,15 +83,19 @@ fn main() {
                 Expr::let_(
                     "_ps",
                     Expr::foreign("print", vec![Expr::var("_s")]),
-                    Expr::foreign("print_nl", vec![]),
+                    Expr::foreign("println", vec![]),
                 ),
             ),
         ),
     );
 
-    emit_sample(
+    compile_program(
+        "out",
         "tree",
         &[("tree", tree_fn), ("sum_tree", sum_tree_fn), ("main", main)],
         "main",
     );
+    Command::new("./out/tree")
+        .status()
+        .expect("failed to run tree");
 }

@@ -6,7 +6,8 @@
 //!   - `a` appears in `cond` AND `then`  → Dup(a) inserted before the If
 //!   - `b` appears only in `else`        → Drop(b) inserted in the then-branch
 
-use lumi::{emit_sample, Expr};
+use lumi::{compile_program, Expr};
+use std::process::Command;
 
 fn main() {
     // or a b = if a then a else b
@@ -39,11 +40,12 @@ fn main() {
                     Expr::let_(
                         &format!("_sv{i}"),
                         Expr::foreign("print", vec![Expr::var(&format!("_r{i}"))]),
-                        Expr::let_(&format!("_sn{i}"), Expr::foreign("print_nl", vec![]), rest),
+                        Expr::let_(&format!("_sn{i}"), Expr::foreign("println", vec![]), rest),
                     ),
                 ),
             )
         });
 
-    emit_sample("or", &[("or", or_fn), ("main", main)], "main");
+    compile_program("out", "or", &[("or", or_fn), ("main", main)], "main");
+    Command::new("./out/or").status().expect("failed to run or");
 }

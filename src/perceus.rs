@@ -53,6 +53,8 @@ fn xform(expr: &Expr, owned: &HashSet<String>) -> rc::Expr {
         // The bound name is owned in the body.
         // If it is never used in the body, insert a Drop immediately.
         Expr::Let { name, value, body } => {
+            let value_fvs = free_vars(value);
+            let body_fvs = free_vars(body);
             let rc_value = xform(value, owned);
 
             let mut body_owned = owned.clone();
@@ -66,11 +68,22 @@ fn xform(expr: &Expr, owned: &HashSet<String>) -> rc::Expr {
                 rc_body
             };
 
-            rc::Expr::Let {
+            let mut result = rc::Expr::Let {
                 name: name.clone(),
                 value: Box::new(rc_value),
                 body: Box::new(rc_body),
+            };
+
+            let mut vars: Vec<&String> = owned
+                .iter()
+                .filter(|var| value_fvs.contains(*var) && body_fvs.contains(*var))
+                .collect();
+            vars.sort();
+            for var in vars {
+                result = rc::Expr::dup(var, result);
             }
+
+            result
         }
 
         // ── Lambda ──────────────────────────────────────────────────────────
@@ -377,5 +390,39 @@ fn reuse_token_for(scrutinee: &str, pat: &Pattern) -> Option<String> {
     match pat {
         Pattern::Con { .. } => Some(format!("reuse_{scrutinee}")),
         _ => None, // wildcard / literal / var — no constructor to reuse
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn let_inserts_dup_for_outer_var_shared_by_value_and_body() {
+        let expr = Expr::let_(
+            "x",
+            Expr::con("Nil", vec![]),
+            Expr::let_(
+                "l",
+                Expr::foreign("println", vec![Expr::var("x")]),
+                Expr::foreign("println", vec![Expr::var("x")]),
+            ),
+        );
+
+        let rc_expr = transform(&expr);
+
+        match rc_expr {
+            rc::Expr::Let { body, .. } => match *body {
+                rc::Expr::Dup { var, body } => {
+                    assert_eq!(var, "x");
+                    match *body {
+                        rc::Expr::Let { name, .. } => assert_eq!(name, "l"),
+                        other => panic!("expected Dup body to be Let, got {other:?}"),
+                    }
+                }
+                other => panic!("expected inner Let to be wrapped in Dup, got {other:?}"),
+            },
+            other => panic!("expected outer expression to be Let, got {other:?}"),
+        }
     }
 }
