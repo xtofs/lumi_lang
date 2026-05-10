@@ -8,21 +8,47 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <stdnoreturn.h>
 
-/* ── Value representation ─────────────────────────────────
+/* ── Value representation (single source of truth) ───────
  *
- *  Every heap object is a fixed 16-byte header followed by
- *  a raw payload of `size` bytes, interpreted by tag:
+ * Header (always 16 bytes):
+ *   offset 0x00: uint32_t rc
+ *   offset 0x04: uint32_t tag
+ *   offset 0x08: uint32_t size   // payload byte length
+ *   offset 0x0C: uint32_t _pad   // keeps payload 8-byte aligned
+ *   offset 0x10: uint8_t payload[size]
  *
- *    TAG_CLOSURE  payload = LumiFn (8 bytes) | Value* captures[]
- *    TAG_INT      payload = int64_t  (8 bytes)
- *    TAG_STR      payload = const char* (8 bytes)
- *    ADT cons     payload = Value* fields[]   (size / sizeof(Value*) fields)
- *    0-arity cons payload = empty             (size = 0)
+ * Tag -> payload encoding -> constructor path:
  *
- *  rc_dec traverses the payload according to the tag so that
- *  closure captures and constructor fields are freed correctly.
+ *   TAG_UNIT/TAG_TRUE/TAG_FALSE/TAG_NIL/TAG_ZERO/TAG_NONE
+ *   payload: empty (size = 0)
+ *   constructors: static singletons (for unit/true/false) and alloc_con/reuse_con
+ *
+ *   TAG_INT
+ *   payload: int64_t value (size = sizeof(int64_t))
+ *   constructors: lumi_int, static singletons lumi_int0/lumi_int1
+ *
+ *   TAG_STR
+ *   payload: NUL-terminated bytes, including '\0'
+ *   size: strlen(s) + 1
+ *   constructors: lumi_str, static singleton lumi_empty_str
+ *
+ *   TAG_CLOSURE
+ *   payload: [LumiFn fn][Value* capture_0]...[Value* capture_n-1]
+ *   size: sizeof(LumiFn) + n * sizeof(Value*)
+ *   constructors: alloc_closure_0, alloc_closure
+ *
+ *   Record constructor tags (product types; e.g. TAG_CONS/TAG_SOME/TAG_SUCC)
+ *   payload: Value* fields[]
+ *   size: nfields * sizeof(Value*)
+ *   constructors: alloc_con, reuse_con
+ *
+ * Ownership/RC notes:
+ *   - A Value owns exactly its allocation (header + payload bytes).
+ *   - rc_dec dispatches by tag to decref nested Value* references where present.
+ *   - Immortal values are represented by a large rc sentinel and skipped by rc_dec.
  * ─────────────────────────────────────────────────────── */
 struct Value;
 typedef struct Value *(*LumiFn)(struct Value *env, struct Value *arg);
@@ -85,9 +111,7 @@ static inline void rc_dec(Value *v)
         }
         else if (v->tag != TAG_INT && v->tag != TAG_STR)
         {
-            // everything but TAG_CLOSURE, TAG_INT and TAG_STR
-            // are using the payload as a field array.
-            // get and decrement the fields
+            // Record/product constructors store payload as Value* fields[].
             uint32_t nfields = v->size / (uint32_t)sizeof(Value *);
             Value **fields = (Value **)v->payload;
             for (uint32_t i = 0; i < nfields; i++)
@@ -182,6 +206,7 @@ static inline Value *alloc_closure_0(LumiFn fn)
 #include <stdarg.h>
 static Value *alloc_closure(LumiFn fn, uint32_t n, ...)
 {
+    // the LumiFn struct and n Value pointers
     uint32_t size = (uint32_t)sizeof(LumiFn) + n * (uint32_t)sizeof(Value *);
     Value *v = (Value *)malloc(sizeof(Value) + size);
     v->rc = 1;
@@ -208,6 +233,28 @@ static inline Value *apply(Value *f, Value *arg)
 static Value LUMI_UNIT_VAL = {0xFFFFFFFF, TAG_UNIT, 0, 0};
 static Value LUMI_TRUE_VAL = {0xFFFFFFFF, TAG_TRUE, 0, 0};
 static Value LUMI_FALSE_VAL = {0xFFFFFFFF, TAG_FALSE, 0, 0};
+
+typedef struct
+{
+    uint32_t rc;
+    uint32_t tag;
+    uint32_t size;
+    uint32_t _pad;
+    int64_t payload;
+} StaticIntValue;
+
+typedef struct
+{
+    uint32_t rc;
+    uint32_t tag;
+    uint32_t size;
+    uint32_t _pad;
+    char payload[1];
+} StaticEmptyStrValue;
+
+static StaticIntValue LUMI_INT0_VAL = {0xFFFFFFFF, TAG_INT, sizeof(int64_t), 0, 0};
+static StaticIntValue LUMI_INT1_VAL = {0xFFFFFFFF, TAG_INT, sizeof(int64_t), 0, 1};
+static StaticEmptyStrValue LUMI_EMPTY_STR_VAL = {0xFFFFFFFF, TAG_STR, 1, 0, ""};
 
 static inline Value *lumi_unit(void) { return &LUMI_UNIT_VAL; }
 static inline Value *lumi_bool(int b) { return b ? &LUMI_TRUE_VAL : &LUMI_FALSE_VAL; }
@@ -238,13 +285,17 @@ static inline Value *lumi_int(int64_t n)
 
 static inline Value *lumi_str(const char *s)
 {
-    uint32_t size = (uint32_t)sizeof(const char *);
+    if (!s || s[0] == '\0')
+        return (Value *)&LUMI_EMPTY_STR_VAL;
+
+    size_t len = strlen(s) + 1;
+    uint32_t size = (uint32_t)len;
     Value *v = (Value *)malloc(sizeof(Value) + size);
     v->rc = 1;
     v->tag = TAG_STR;
     v->size = size;
     v->_pad = 0;
-    *(const char **)v->payload = s;
+    memcpy(v->payload, s, len);
     return v;
 }
 
@@ -274,15 +325,53 @@ static inline Value *int_eq(Value *a, Value *b)
     return lumi_bool(result);
 }
 
-/* Immortal integer singletons — initialised by lumi_runtime_init() */
-static Value *LUMI_INT0;
-static Value *LUMI_INT1;
-static inline Value *lumi_int0(void) { return LUMI_INT0; }
-static inline Value *lumi_int1(void) { return LUMI_INT1; }
+/* ── Strings ─────────────────────────────────────────────── */
+
+static inline Value *str_concat(Value *a, Value *b)
+{
+    const char *as = (const char *)a->payload;
+    const char *bs = (const char *)b->payload;
+    size_t alen = strlen(as);
+    size_t blen = strlen(bs);
+    uint32_t size = (uint32_t)(alen + blen + 1);
+
+    Value *v = (Value *)malloc(sizeof(Value) + size);
+    v->rc = 1;
+    v->tag = TAG_STR;
+    v->size = size;
+    v->_pad = 0;
+
+    memcpy(v->payload, as, alen);
+    memcpy(v->payload + alen, bs, blen + 1);
+
+    rc_dec(a);
+    rc_dec(b);
+    return v;
+}
+
+static inline Value *str_eq(Value *a, Value *b)
+{
+    int result = strcmp((const char *)a->payload, (const char *)b->payload) == 0;
+    rc_dec(a);
+    rc_dec(b);
+    return lumi_bool(result);
+}
+
+static inline Value *str_len(Value *s)
+{
+    int64_t n = (int64_t)strlen((const char *)s->payload);
+    rc_dec(s);
+    return lumi_int(n);
+}
+
+/* Immortal singleton values */
+static inline Value *lumi_int0(void) { return (Value *)&LUMI_INT0_VAL; }
+static inline Value *lumi_int1(void) { return (Value *)&LUMI_INT1_VAL; }
+static inline Value *lumi_empty_str(void) { return (Value *)&LUMI_EMPTY_STR_VAL; }
+
 static inline void lumi_runtime_init(void)
 {
-    LUMI_INT0 = lumi_global(lumi_int(0));
-    LUMI_INT1 = lumi_global(lumi_int(1));
+    /* Intentionally empty: singleton values are now static and immortal. */
 }
 
 noreturn static void lumi_panic(const char *msg)
@@ -291,7 +380,7 @@ noreturn static void lumi_panic(const char *msg)
     exit(1);
 }
 
-/* ── Standard library: print and nat/list helpers ────────────
+/* ── Standard library: print helpers ────────────
  *  print() handles any Value* — tag determines the format.
  * ─────────────────────────────────────────────────────────── */
 
@@ -329,7 +418,7 @@ static Value *print(Value *v)
         rc_dec(v);
         break;
     case TAG_STR:
-        printf("%s", *(const char **)v->payload);
+        printf("%s", (const char *)v->payload);
         rc_dec(v);
         break;
     case TAG_CONS:

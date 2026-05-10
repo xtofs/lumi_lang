@@ -1,5 +1,3 @@
-use chumsky::input::Input;
-
 /// C code generator.
 ///
 /// Emits a C translation unit with:
@@ -104,6 +102,19 @@ fn rc_comment(label: &str, expr: &rc::Expr) -> String {
     }
     out.push_str(" */");
     out
+}
+
+fn builtin_foreign_arity(name: &str) -> usize {
+    match name {
+        "print" | "println" => 1,
+        "int_add" | "int_sub" | "int_eq" => 2,
+        "str_concat" | "str_eq" => 2,
+        "str_len" => 1,
+        "lumi_int0" | "lumi_int1" | "lumi_unit" => 0,
+        _ => panic!(
+            "unknown foreign `{name}`; supported builtins: print, println, int_add, int_sub, int_eq, str_concat, str_eq, str_len, lumi_int0, lumi_int1, lumi_unit"
+        ),
+    }
 }
 
 struct Codegen {
@@ -282,6 +293,12 @@ impl Codegen {
 
             // ── Foreign call ─────────────────────────────────────────────────
             rc::Expr::Foreign { name, args } => {
+                let expected = builtin_foreign_arity(name);
+                assert!(
+                    args.len() == expected,
+                    "foreign `{name}` expects {expected} argument(s), got {}",
+                    args.len()
+                );
                 let arg_vals: Vec<String> = args.iter().map(|a| self.emit_expr(a, fw)).collect();
                 let t = fw.tmp();
                 fw.line(&format!("Value* {t} = {name}({});", arg_vals.join(", ")));
