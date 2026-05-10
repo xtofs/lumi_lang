@@ -1,4 +1,3 @@
-use std::io;
 
 use lumi::ast::Lit;
 use lumi::rc::Expr as RcExpr;
