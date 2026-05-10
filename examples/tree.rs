@@ -82,8 +82,8 @@ fn main() {
                 Expr::app(Expr::var("sum_tree"), Expr::var("_t")),
                 Expr::let_(
                     "_ps",
-                    Expr::foreign("print", vec![Expr::var("_s")]),
-                    Expr::foreign("println", vec![]),
+                    Expr::foreign("println", vec![Expr::var("_s")]),
+                    Expr::unit(),
                 ),
             ),
         ),

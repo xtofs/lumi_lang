@@ -219,16 +219,16 @@ f 42  -- infer f [Int] 42
 
 ## Implementation Order (Recommended)
 
-| Step | Task | Dependencies | Est. Complexity |
-|------|------|---|---|
-| 1 | Extend AST with `TyLam`, `TyApp`, `Type` enum | None | Low |
-| 2 | Update parser to recognize type syntax | Step 1 | Medium |
-| 3 | Build type inference engine | Steps 1–2 | High |
-| 4 | Implement monomorphization pass | Steps 1–3 | Medium |
-| 5 | Verify codegen output unchanged (existing examples) | Steps 1–4 | Low |
-| 6 | Add System F examples & tests | Step 5 | Low |
-| 7 | Optimize codegen (de-duplicate monomorphized instances) | Step 6 | Medium |
-| 8 | Documentation + TODOs for rank-N | Step 7 | Low |
+| Step | Task                                                    | Dependencies | Est. Complexity |
+|------|---------------------------------------------------------|--------------|-----------------|
+| 1    | Extend AST with `TyLam`, `TyApp`, `Type` enum           | None         | Low             |
+| 2    | Update parser to recognize type syntax                  | Step 1       | Medium          |
+| 3    | Build type inference engine                             | Steps 1–2    | High            |
+| 4    | Implement monomorphization pass                         | Steps 1–3    | Medium          |
+| 5    | Verify codegen output unchanged (existing examples)     | Steps 1–4    | Low             |
+| 6    | Add System F examples & tests                           | Step 5       | Low             |
+| 7    | Optimize codegen (de-duplicate monomorphized instances) | Step 6       | Medium          |
+| 8    | Documentation + TODOs for rank-N                        | Step 7       | Low             |
 
 ---
 

@@ -93,14 +93,19 @@ impl Expr {
                 write!(w, "){reuse}")?;
             }
             Expr::Foreign { name, args } => {
-                write!(w, "{name}(")?;
-                for (i, a) in args.iter().enumerate() {
-                    if i > 0 {
-                        write!(w, ", ")?;
+                if args.is_empty() {
+                    write!(w, "foreign({name})")?;
+                } else {
+                    write!(w, "foreign({name};")?;
+                    for (i, a) in args.iter().enumerate() {
+                        if i > 0 {
+                            write!(w, ",")?;
+                        }
+                        write!(w, " ")?;
+                        a.pp_inner(w, false)?;
                     }
-                    a.pp_inner(w, false)?;
+                    write!(w, ")")?;
                 }
-                write!(w, ")")?;
             }
         }
 
@@ -226,14 +231,19 @@ impl Expr {
                 write!(w, "){reuse}")?;
             }
             Expr::Foreign { name, args } => {
-                write!(w, "{name}(")?;
-                for (i, a) in args.iter().enumerate() {
-                    if i > 0 {
-                        write!(w, ", ")?;
+                if args.is_empty() {
+                    write!(w, "foreign({name})")?;
+                } else {
+                    write!(w, "foreign({name};")?;
+                    for (i, a) in args.iter().enumerate() {
+                        if i > 0 {
+                            write!(w, ",")?;
+                        }
+                        write!(w, " ")?;
+                        a.pp_with_indent(w, indent)?;
                     }
-                    a.pp_with_indent(w, indent)?;
+                    write!(w, ")")?;
                 }
-                write!(w, ")")?;
             }
         }
         Ok(())

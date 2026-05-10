@@ -94,7 +94,15 @@ pub fn compile_program(out_dir: &str, name: &str, functions: &[(&str, Expr)], en
     let bin_path = format!("{out_dir}/{name}");
 
     let status = Command::new("cc")
-        .args(["-std=c11", "-g", "-fno-omit-frame-pointer", "-O0", "-o", &bin_path, &c_path])
+        .args([
+            "-std=c11",
+            "-g",
+            "-fno-omit-frame-pointer",
+            "-O0",
+            "-o",
+            &bin_path,
+            &c_path,
+        ])
         .status()
         .unwrap_or_else(|e| panic!("failed to launch cc: {e}"));
     assert!(status.success(), "cc exited with {status}");

@@ -37,6 +37,8 @@ pub enum Token {
     Equals,
     #[token(",")]
     Comma,
+    #[token(";")]
+    Semicolon,
     #[token("|")]
     Pipe,
     #[token("(")]
@@ -89,6 +91,7 @@ impl fmt::Display for Token {
             Token::FatArrow => write!(f, "=>"),
             Token::Equals => write!(f, "="),
             Token::Comma => write!(f, ","),
+            Token::Semicolon => write!(f, ";"),
             Token::Pipe => write!(f, "|"),
             Token::LParen => write!(f, "("),
             Token::RParen => write!(f, ")"),
@@ -163,6 +166,10 @@ where
             Token::Lower(s) => Expr::Var(s),
         };
 
+        let unit = just(Token::LParen)
+            .then(just(Token::RParen))
+            .to(Expr::Lit(Lit::Unit));
+
         let paren = expr
             .clone()
             .delimited_by(just(Token::LParen), just(Token::RParen));
@@ -182,19 +189,21 @@ where
         .map(|(tag, fields)| Expr::Con { tag, fields });
 
         let foreign = just(Token::Foreign)
-            .ignore_then(select! {
-                Token::Str(s) => s,
-            })
-            .then(
-                expr.clone()
-                    .separated_by(just(Token::Comma))
-                    .allow_trailing()
-                    .collect::<Vec<_>>()
+            .ignore_then(
+                select! { Token::Lower(s) => s, }
+                    .or(select! { Token::Upper(s) => s, })
+                    .then_ignore(just(Token::Semicolon))
+                    .then(
+                        expr.clone()
+                            .separated_by(just(Token::Comma))
+                            .allow_trailing()
+                            .collect::<Vec<_>>(),
+                    )
                     .delimited_by(just(Token::LParen), just(Token::RParen)),
             )
             .map(|(name, args)| Expr::Foreign { name, args });
 
-        let atom = choice((int, paren, foreign, con, var));
+        let atom = choice((int, unit, paren, foreign, con, var));
 
         let app = atom
             .clone()

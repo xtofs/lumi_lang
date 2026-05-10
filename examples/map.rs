@@ -10,77 +10,52 @@
 //! The lambda `λx. int_add(x, 1)` passed as `f` exercises closure capture:
 //! `lumi_int1` (an immortal singleton) is captured and referenced on every call.
 
-use lumi::{compile_program, expr_list, Expr, MatchArm, Pattern};
+use lumi::{compile_program, parser, Expr};
 use std::process::Command;
 
 fn main() {
-    let map_fn = Expr::lam(
-        "f",
-        Expr::lam(
-            "xs",
-            Expr::match_(
-                Expr::var("xs"),
-                vec![
-                    MatchArm::new(Pattern::con("Nil", vec![]), Expr::con("Nil", vec![])),
-                    MatchArm::new(
-                        Pattern::con("Cons", vec![Pattern::var("h"), Pattern::var("t")]),
-                        Expr::con(
-                            "Cons",
-                            vec![
-                                Expr::app(Expr::var("f"), Expr::var("h")),
-                                Expr::app(
-                                    Expr::app(Expr::var("map"), Expr::var("f")),
-                                    Expr::var("t"),
-                                ),
-                            ],
-                        ),
-                    ),
-                ],
-            ),
-        ),
+    let n = 100;
+    let map_fn = parse_expr(
+        r#"\f -> \xs -> match xs {
+            | Nil => Nil()
+            | Cons(h, t) => Cons(f h, (map f) t)
+            }"#,
     );
 
     // f = λx. int_add(x, 1)  — captures lumi_int1 (immortal singleton)
-    let inc_fn = Expr::lam(
-        "x",
-        Expr::foreign(
-            "int_add",
-            vec![Expr::var("x"), Expr::foreign("lumi_int1", vec![])],
-        ),
+    let inc_fn = parse_expr(r#"\x -> foreign(int_add; x, foreign(lumi_int1;))"#);
+
+    let input_src = make_list(n);
+    let main = parse_expr(&format!(
+        r#"let inp = {input_src} 
+        in let l = foreign(println; inp) 
+        in let mapinc = map inc 
+        in let out = mapinc inp 
+        in let p = foreign(println; out) 
+        in foreign(println; ())"#
+    ));
+
+    compile_program(
+        "out",
+        "map",
+        &[("map", map_fn), ("inc", inc_fn), ("main", main)],
+        "main",
     );
-
-    let n = 10;
-    let lst: Vec<Expr> = (0..n).map(|i| Expr::int(i)).collect();
-
-    let main = Expr::let_(
-        "_inc",
-        inc_fn,
-        Expr::let_(
-            "_inp",
-            expr_list(lst),
-            Expr::let_(
-                "_l",
-                Expr::foreign("println", vec![Expr::var("_inp")]),
-                // Expr::unit(),
-                Expr::let_(
-                    "_map_inc",
-                    Expr::app(Expr::var("map"), Expr::var("_inc")),
-                    Expr::let_(
-                        "_out",
-                        Expr::app(Expr::var("_map_inc"), Expr::var("_inp")),
-                        Expr::let_(
-                            "_p",
-                            Expr::foreign("println", vec![Expr::var("_out")]),
-                            Expr::foreign("println", vec![Expr::unit()]),
-                        ),
-                    ),
-                ),
-            ),
-        ),
-    );
-
-    compile_program("out", "map", &[("map", map_fn), ("main", main)], "main");
     Command::new("./out/map")
         .status()
         .expect("failed to run map");
+}
+
+fn parse_expr(src: &str) -> Expr {
+    let (expr, errors) = parser::parse(src);
+    if !errors.is_empty() {
+        panic!("parse errors in `{src}`: {}", errors.join(" | "));
+    }
+    expr.expect("parser returned no expression")
+}
+
+fn make_list(len: i64) -> String {
+    (0..len).rev().fold(String::from("Nil()"), |tail, head| {
+        format!("Cons({head}, {tail})")
+    })
 }

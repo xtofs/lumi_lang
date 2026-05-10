@@ -47,8 +47,8 @@ fn main() {
                 Expr::app(Expr::var("inc_list"), Expr::var("_inp")),
                 Expr::let_(
                     "_p",
-                    Expr::foreign("print", vec![Expr::var("_out")]),
-                    Expr::foreign("println", vec![]),
+                    Expr::foreign("println", vec![Expr::var("_out")]),
+                    Expr::unit(),
                 ),
             ),
         ),

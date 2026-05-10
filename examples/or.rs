@@ -39,8 +39,8 @@ fn main() {
                     Expr::app(Expr::app(Expr::var("or"), Expr::bool_(a)), Expr::bool_(b)),
                     Expr::let_(
                         &format!("_sv{i}"),
-                        Expr::foreign("print", vec![Expr::var(&format!("_r{i}"))]),
-                        Expr::let_(&format!("_sn{i}"), Expr::foreign("println", vec![]), rest),
+                        Expr::foreign("println", vec![Expr::var(&format!("_r{i}"))]),
+                        rest,
                     ),
                 ),
             )

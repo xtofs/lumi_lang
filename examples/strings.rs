@@ -28,7 +28,10 @@ fn main() {
                             Expr::var("hw"),
                             Expr::let_(
                                 "prefix",
-                                Expr::foreign("str_concat", vec![Expr::var("hello"), Expr::var("comma")]),
+                                Expr::foreign(
+                                    "str_concat",
+                                    vec![Expr::var("hello"), Expr::var("comma")],
+                                ),
                                 Expr::let_(
                                     "full",
                                     Expr::foreign(
@@ -45,13 +48,18 @@ fn main() {
                                                 "_p3",
                                                 Expr::foreign(
                                                     "println",
-                                                    vec![Expr::foreign("str_len", vec![Expr::var("full")])],
+                                                    vec![Expr::foreign(
+                                                        "str_len",
+                                                        vec![Expr::var("full")],
+                                                    )],
                                                 ),
                                                 Expr::let_(
                                                     "_p4",
                                                     Expr::foreign(
                                                         "print",
-                                                        vec![Expr::str_("equals \"Hello, World!\" = ")],
+                                                        vec![Expr::str_(
+                                                            "equals \"Hello, World!\" = ",
+                                                        )],
                                                     ),
                                                     Expr::let_(
                                                         "_p5",
@@ -65,7 +73,10 @@ fn main() {
                                                                 ],
                                                             )],
                                                         ),
-                                                        Expr::foreign("println", vec![Expr::unit()]),
+                                                        Expr::foreign(
+                                                            "println",
+                                                            vec![Expr::unit()],
+                                                        ),
                                                     ),
                                                 ),
                                             ),
