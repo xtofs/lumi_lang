@@ -33,7 +33,8 @@
  *   TAG_STR
  *   payload: NUL-terminated bytes, including '\0'
  *   size: strlen(s) + 1
- *   constructors: lumi_str, static singleton lumi_empty_str
+ *   constructors: lumi_str, lumi_str_alloc (write payload yourself),
+ *   static singleton: lumi_empty_str
  *
  *   TAG_CLOSURE
  *   payload: [LumiFn fn][Value* capture_0]...[Value* capture_n-1]
@@ -230,10 +231,6 @@ static inline Value *apply(Value *f, Value *arg)
 
 /* ── Primitive value constructors ────────────────────────── */
 
-static Value LUMI_UNIT_VAL = {0xFFFFFFFF, TAG_UNIT, 0, 0};
-static Value LUMI_TRUE_VAL = {0xFFFFFFFF, TAG_TRUE, 0, 0};
-static Value LUMI_FALSE_VAL = {0xFFFFFFFF, TAG_FALSE, 0, 0};
-
 typedef struct
 {
     uint32_t rc;
@@ -252,12 +249,23 @@ typedef struct
     char payload[1];
 } StaticEmptyStrValue;
 
+static Value LUMI_UNIT_VAL = {0xFFFFFFFF, TAG_UNIT, 0, 0};
+static Value LUMI_TRUE_VAL = {0xFFFFFFFF, TAG_TRUE, 0, 0};
+static Value LUMI_FALSE_VAL = {0xFFFFFFFF, TAG_FALSE, 0, 0};
+static Value LUMI_NIL_VAL = {0xFFFFFFFF, TAG_NIL, 0, 0};
+
 static StaticIntValue LUMI_INT0_VAL = {0xFFFFFFFF, TAG_INT, sizeof(int64_t), 0, 0};
 static StaticIntValue LUMI_INT1_VAL = {0xFFFFFFFF, TAG_INT, sizeof(int64_t), 0, 1};
 static StaticEmptyStrValue LUMI_EMPTY_STR_VAL = {0xFFFFFFFF, TAG_STR, 1, 0, ""};
 
 static inline Value *lumi_unit(void) { return &LUMI_UNIT_VAL; }
+static inline Value *lumi_nil(void) { return &LUMI_NIL_VAL; }
 static inline Value *lumi_bool(int b) { return b ? &LUMI_TRUE_VAL : &LUMI_FALSE_VAL; }
+
+static inline Value *lumi_int0(void) { return (Value *)&LUMI_INT0_VAL; }
+static inline Value *lumi_int1(void) { return (Value *)&LUMI_INT1_VAL; }
+static inline Value *lumi_empty_str(void) { return (Value *)&LUMI_EMPTY_STR_VAL; }
+
 static inline int lumi_is_true(Value *v) { return v && v->tag == TAG_TRUE; }
 
 static inline Value *lumi_global(Value *v)
@@ -283,18 +291,26 @@ static inline Value *lumi_int(int64_t n)
     return v;
 }
 
+/* lumi_str_alloc(n): allocate a TAG_STR value with n bytes of writable payload.
+ * The caller must write exactly n-1 content bytes and place a '\0' at payload[n-1].
+ * Use this when the byte content is not yet available as a C string (e.g. str_concat). */
+static inline Value *lumi_str_alloc(size_t n)
+{
+    Value *v = (Value *)malloc(sizeof(Value) + n);
+    v->rc = 1;
+    v->tag = TAG_STR;
+    v->size = (uint32_t)n;
+    v->_pad = 0;
+    return v;
+}
+
 static inline Value *lumi_str(const char *s)
 {
     if (!s || s[0] == '\0')
         return (Value *)&LUMI_EMPTY_STR_VAL;
 
     size_t len = strlen(s) + 1;
-    uint32_t size = (uint32_t)len;
-    Value *v = (Value *)malloc(sizeof(Value) + size);
-    v->rc = 1;
-    v->tag = TAG_STR;
-    v->size = size;
-    v->_pad = 0;
+    Value *v = lumi_str_alloc(len);
     memcpy(v->payload, s, len);
     return v;
 }
@@ -333,14 +349,8 @@ static inline Value *str_concat(Value *a, Value *b)
     const char *bs = (const char *)b->payload;
     size_t alen = strlen(as);
     size_t blen = strlen(bs);
-    uint32_t size = (uint32_t)(alen + blen + 1);
 
-    Value *v = (Value *)malloc(sizeof(Value) + size);
-    v->rc = 1;
-    v->tag = TAG_STR;
-    v->size = size;
-    v->_pad = 0;
-
+    Value *v = lumi_str_alloc(alen + blen + 1);
     memcpy(v->payload, as, alen);
     memcpy(v->payload + alen, bs, blen + 1);
 
@@ -363,11 +373,6 @@ static inline Value *str_len(Value *s)
     rc_dec(s);
     return lumi_int(n);
 }
-
-/* Immortal singleton values */
-static inline Value *lumi_int0(void) { return (Value *)&LUMI_INT0_VAL; }
-static inline Value *lumi_int1(void) { return (Value *)&LUMI_INT1_VAL; }
-static inline Value *lumi_empty_str(void) { return (Value *)&LUMI_EMPTY_STR_VAL; }
 
 static inline void lumi_runtime_init(void)
 {
