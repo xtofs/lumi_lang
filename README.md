@@ -8,8 +8,9 @@ The core is based on the untyped lambda calculus, with memory management inspire
 ## Usage
 
 - Build: `cargo build`
-- Run examples (i.e. compile to c): `cargo run --example <example_name>`
-- also compile the C code and run: `./demo.sh <example_name>`
+- Run examples (compiles to C, then runs): `cargo run --example <example_name>`
+
+The generated C binaries are produced with debug symbols (`-g`, `-fno-omit-frame-pointer`, `-O0`) for easier debugging with `lldb` or `gdb`.
 
 ## Structure
 

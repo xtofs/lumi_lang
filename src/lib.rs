@@ -82,7 +82,11 @@ pub fn emit_program(out_dir: &str, name: &str, functions: &[(&str, Expr)], entry
 /// `<out_dir>`, then invoke the C compiler to produce a native binary.
 ///
 /// Equivalent to calling [`emit_program`] followed by:
-///   cc -std=c11 -o <out_dir>/<name> <out_dir>/<name>.c
+///   cc -std=c11 -g -fno-omit-frame-pointer -O0 -o <out_dir>/<name> <out_dir>/<name>.c
+///
+/// The `-g` flag includes DWARF debug symbols for debugger use.
+/// `-fno-omit-frame-pointer` preserves frame pointers for better stack traces.
+/// `-O0` disables optimizations for easier stepping and more accurate variable inspection.
 pub fn compile_program(out_dir: &str, name: &str, functions: &[(&str, Expr)], entry: &str) {
     emit_program(out_dir, name, functions, entry);
 
@@ -90,7 +94,7 @@ pub fn compile_program(out_dir: &str, name: &str, functions: &[(&str, Expr)], en
     let bin_path = format!("{out_dir}/{name}");
 
     let status = Command::new("cc")
-        .args(["-std=c11", "-o", &bin_path, &c_path])
+        .args(["-std=c11", "-g", "-fno-omit-frame-pointer", "-O0", "-o", &bin_path, &c_path])
         .status()
         .unwrap_or_else(|e| panic!("failed to launch cc: {e}"));
     assert!(status.success(), "cc exited with {status}");
